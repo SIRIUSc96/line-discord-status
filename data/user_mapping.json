@@ -1,0 +1,4 @@
+{
+  "_comment": "LINE ユーザーID → Discord 表示名 のマッピング。不要なら空のままでOK（LINE表示名がそのまま使われます）",
+  "_example_line_user_id": "Discord表示名"
+}

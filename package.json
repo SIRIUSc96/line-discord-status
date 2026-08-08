@@ -1,0 +1,18 @@
+{
+  "name": "line-discord-status",
+  "version": "1.0.0",
+  "description": "LINE スタンプで Discord 通話ステータスボードを操作するツール",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
