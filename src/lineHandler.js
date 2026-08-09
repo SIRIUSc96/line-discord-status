@@ -63,6 +63,33 @@ async function sendLineReply(accessToken, replyToken, text) {
 }
 
 /**
+ * LINE チャットへPushメッセージを送信
+ */
+async function sendLinePush(accessToken, userIds, text) {
+  if (!userIds || userIds.length === 0) return;
+  try {
+    await fetch('https://api.line.me/v2/bot/message/multicast', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        to: userIds,
+        messages: [
+          {
+            type: 'text',
+            text: text,
+          },
+        ],
+      }),
+    });
+  } catch (e) {
+    console.error('LINE Pushエラー:', e.message);
+  }
+}
+
+/**
  * LINE Webhook ハンドラーを作成
  */
 function createLineHandler(config, statusManager, discordBot) {
@@ -85,14 +112,28 @@ function createLineHandler(config, statusManager, discordBot) {
     }
 
     for (const event of events) {
-      // スタンプメッセージのみ処理
-      if (event.type !== 'message' || event.message?.type !== 'sticker') {
-        continue;
-      }
+      if (event.type !== 'message') continue;
 
       const userId = event.source?.userId;
       const replyToken = event.replyToken;
       if (!userId) continue;
+
+      let updateType = null;
+
+      if (event.message.type === 'sticker') {
+        updateType = 'STAMP';
+      } else if (event.message.type === 'text') {
+        const text = event.message.text.trim();
+        if (text === 'なんでも') updateType = 'TEXT_ANY';
+        else if (text === '作業') updateType = 'TEXT_WORK';
+        else if (text === '聞き専') updateType = 'TEXT_LISTEN';
+        else if (text === '通知削除') updateType = 'TEXT_OFF';
+      }
+
+      if (!updateType) {
+        // スタンプでもリッチメニューのテキストでもない場合は無視
+        continue;
+      }
 
       // LINE 表示名を取得
       const displayName = await getLineProfile(
@@ -100,12 +141,10 @@ function createLineHandler(config, statusManager, discordBot) {
         userId
       );
 
-      console.log(
-        `📩 スタンプ受信: ${displayName} (userId: ${userId}, stickerId: ${event.message.stickerId})`
-      );
+      console.log(`📩 メッセージ受信 [${updateType}]: ${displayName} (userId: ${userId})`);
 
       // ステータス更新
-      const result = statusManager.handleStamp(userId, displayName);
+      const result = statusManager.handleUpdate(userId, displayName, updateType);
       const activeUsers = statusManager.getActiveUsers();
 
       console.log(`   → アクション: ${result.action} (表示名: ${result.displayName})`);
@@ -114,14 +153,24 @@ function createLineHandler(config, statusManager, discordBot) {
       let replyText = '';
 
       switch (result.action) {
-        case 'ON_SILENT':
+        case 'ON_ANY':
           await discordBot.updateEmbed(activeUsers);
-          replyText = '🟢 通話ステータスをONにしました！（サイレント待機中）\n※1時間以内にもう一度スタンプを送ると @here 通知を送れます。';
+          replyText = '🟢 通話ステータスを【なんでも】にしました！\n※スタンプを押すと @here 通知を送れます。';
+          break;
+
+        case 'ON_WORK':
+          await discordBot.updateEmbed(activeUsers);
+          replyText = '💻 通話ステータスを【作業】にしました！';
+          break;
+
+        case 'ON_LISTEN':
+          await discordBot.updateEmbed(activeUsers);
+          replyText = '🎧 通話ステータスを【聞き専】にしました！';
           break;
 
         case 'NOTIFY':
-          await discordBot.updateEmbed(activeUsers);
           await discordBot.sendNotification(userId, result.displayName);
+          await discordBot.updateEmbed(activeUsers);
           replyText = '🔔 Discordに @here 通知を送信しました！（通話呼びかけ中）\n※あと2回スタンプを送るとステータスを取り消せます。';
           break;
 
@@ -137,6 +186,12 @@ function createLineHandler(config, statusManager, discordBot) {
 
       // LINE に返信
       if (replyText) {
+        // 誰かが既にDiscordのVCにいるかチェック
+        const vcMembers = discordBot.getVoiceChannelMembers();
+        if (vcMembers.length > 0 && result.action.startsWith('ON_')) {
+          replyText += `\n\n💡 現在、ボイスチャットで ${vcMembers.join('と')} が通話しています！`;
+        }
+
         await sendLineReply(config.line.channelAccessToken, replyToken, replyText);
       }
     }
@@ -145,4 +200,4 @@ function createLineHandler(config, statusManager, discordBot) {
   };
 }
 
-module.exports = { createLineHandler };
+module.exports = { createLineHandler, sendLinePush };

@@ -9,7 +9,7 @@ const config = {
     botToken: process.env.DISCORD_BOT_TOKEN,
     channelId: process.env.DISCORD_CHANNEL_ID,
   },
-  statusTimeoutHours: parseInt(process.env.STATUS_TIMEOUT_HOURS || '3', 10),
+  statusTimeoutHours: parseInt(process.env.STATUS_TIMEOUT_HOURS || '1', 10),
   notifyWindowMinutes: parseInt(process.env.NOTIFY_WINDOW_MINUTES || '60', 10),
   port: parseInt(process.env.PORT || '3000', 10),
 };

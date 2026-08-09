@@ -81,76 +81,99 @@ class StatusManager {
   // --- メインロジック ---
 
   /**
-   * スタンプ受信時の処理
+   * ステータス更新（スタンプ or テキスト）
    * @param {string} userId - LINE ユーザーID
    * @param {string} lineDisplayName - LINE の表示名
-   * @returns {{ action: 'ON_SILENT'|'NOTIFY'|'NONE'|'OFF', displayName: string }}
+   * @param {string} type - 'STAMP' | 'TEXT_ANY' | 'TEXT_WORK' | 'TEXT_LISTEN' | 'TEXT_OFF'
+   * @returns {{ action: 'ON_ANY'|'ON_WORK'|'ON_LISTEN'|'NOTIFY'|'NONE'|'OFF', displayName: string }}
    */
-  handleStamp(userId, lineDisplayName) {
+  handleUpdate(userId, lineDisplayName, type) {
     const now = Date.now();
-    const user = this.users[userId];
     const displayName = this._getDisplayName(userId, lineDisplayName);
     const windowMs = this.config.notifyWindowMinutes * 60 * 1000;
+    let user = this.users[userId];
 
-    // --- OFF状態 or 未登録 → ステータスON ---
+    // 新規・OFFからの復帰用の初期データ
     if (!user || user.state === 'OFF') {
-      this.users[userId] = {
-        state: 'ON_SILENT',
-        count: 1,
-        startedAt: now,
-        lineDisplayName,
-        discordDisplayName: displayName,
-      };
-      this._save();
-      return { action: 'ON_SILENT', displayName };
-    }
-
-    // --- 1時間ウィンドウ外 → OFF ---
-    const elapsed = now - user.startedAt;
-    if (elapsed > windowMs) {
-      this.users[userId] = {
+      user = {
         state: 'OFF',
         count: 0,
         startedAt: 0,
         lineDisplayName,
         discordDisplayName: displayName,
       };
+      this.users[userId] = user;
+    }
+
+    // ユーザー情報更新
+    user.lineDisplayName = lineDisplayName;
+    user.discordDisplayName = displayName;
+
+    // --- テキストによる明示的な状態指定 ---
+    if (type === 'TEXT_OFF') {
+      user.state = 'OFF';
+      user.count = 0;
+      user.startedAt = 0;
       this._save();
       return { action: 'OFF', displayName };
     }
 
-    // --- 1時間ウィンドウ内 → カウントで分岐 ---
-    user.count += 1;
-    user.lineDisplayName = lineDisplayName;
-    user.discordDisplayName = displayName;
-
-    let action = 'NONE';
-
-    switch (user.count) {
-      case 2:
-        // 2個目 → 通知送信
-        user.state = 'ON_NOTIFIED';
-        action = 'NOTIFY';
-        break;
-
-      case 3:
-        // 3個目 → 変化なし
-        action = 'NONE';
-        break;
-
-      default:
-        // 4個目以上 → OFF（取り消し）
-        if (user.count >= 4) {
-          user.state = 'OFF';
-          user.count = 0;
-          user.startedAt = 0;
-          action = 'OFF';
-        }
-        break;
+    if (type.startsWith('TEXT_')) {
+      const newState = type.replace('TEXT_', 'ON_');
+      
+      // すでにその状態で、なおかつ1時間以内なら何もしない（あるいはカウントリセット等）
+      // 今回は純粋に状態を上書きし、タイマーをリセットする
+      user.state = newState;
+      user.count = 1;
+      user.startedAt = now;
+      this._save();
+      return { action: newState, displayName };
     }
 
-    this._save();
-    return { action, displayName };
+    // --- スタンプによる状態遷移（従来互換） ---
+    if (type === 'STAMP') {
+      if (user.state === 'OFF') {
+        user.state = 'ON_ANY';
+        user.count = 1;
+        user.startedAt = now;
+        this._save();
+        return { action: 'ON_ANY', displayName };
+      }
+
+      // 1時間ウィンドウ外なら、状態リセットしてON_ANYにする
+      const elapsed = now - user.startedAt;
+      if (elapsed > windowMs) {
+        user.state = 'ON_ANY';
+        user.count = 1;
+        user.startedAt = now;
+        this._save();
+        return { action: 'ON_ANY', displayName };
+      }
+
+      // 1時間ウィンドウ内
+      user.count += 1;
+      let action = 'NONE';
+
+      if (user.count === 2) {
+        // 2回目で通知
+        user.state = 'ON_NOTIFIED';
+        action = 'NOTIFY';
+      } else if (user.count === 3) {
+        // 3回目は変化なし
+        action = 'NONE';
+      } else {
+        // 4回目でOFF
+        user.state = 'OFF';
+        user.count = 0;
+        user.startedAt = 0;
+        action = 'OFF';
+      }
+
+      this._save();
+      return { action, displayName };
+    }
+
+    return { action: 'NONE', displayName };
   }
 
   // --- ステータス照会 ---

@@ -1,9 +1,8 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
+const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
 
 /**
  * Discord Bot の管理
- * - ステータス Embed の作成・更新
- * - @here 通知の送信・自動削除
  */
 class DiscordBot {
   constructor(config) {
@@ -12,12 +11,15 @@ class DiscordBot {
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates, // VCの入退室監視と接続に必要
       ],
     });
     this.statusMessageId = null;
     this.channel = null;
+    this.guild = null;
     this.ready = false;
     this.notificationMessages = new Map(); // lineUserId -> messageId
+    this.onVoiceJoinCallback = null; // VC入室時に呼ばれるコールバック
   }
 
   /**
@@ -36,6 +38,7 @@ class DiscordBot {
           if (!this.channel.isTextBased()) {
             throw new Error('指定されたチャンネルはテキストチャンネルではありません');
           }
+          this.guild = this.channel.guild;
 
           await this._findOrCreateStatusMessage();
           this.ready = true;
@@ -43,6 +46,11 @@ class DiscordBot {
         } catch (e) {
           reject(e);
         }
+      });
+
+      // VC入退室の監視
+      this.client.on('voiceStateUpdate', (oldState, newState) => {
+        this._handleVoiceStateUpdate(oldState, newState);
       });
 
       this.client.on('error', (error) => {
@@ -54,8 +62,109 @@ class DiscordBot {
   }
 
   /**
-   * 既存のステータス Embed を探すか、新規作成
+   * VC入退室時のイベントハンドラ
    */
+  _handleVoiceStateUpdate(oldState, newState) {
+    // Bot自身の移動は無視
+    if (newState.member?.user?.bot) return;
+
+    // 前はどこにも入っていなくて、新しくVCに入った（入室）
+    if (!oldState.channelId && newState.channelId) {
+      const channel = newState.channel;
+      const memberName = newState.member?.displayName || newState.member?.user?.username || '誰か';
+      console.log(`🎙️ ${memberName} が ${channel.name} に入室しました`);
+
+      // もしBotがそのVCにいる場合、ユーザーが入ってきたので退出する（邪魔にならないように）
+      const connection = getVoiceConnection(newState.guild.id);
+      if (connection && connection.joinConfig.channelId === newState.channelId) {
+        console.log('🚪 ユーザーが入室したため、BotはVCから退出します');
+        connection.destroy();
+      }
+
+      // 登録されたコールバックがあれば実行（LINEへのPush通知など）
+      if (this.onVoiceJoinCallback) {
+        this.onVoiceJoinCallback(memberName, channel.name);
+      }
+    }
+  }
+
+  /**
+   * コールバックの登録
+   */
+  onVoiceJoin(callback) {
+    this.onVoiceJoinCallback = callback;
+  }
+
+  /**
+   * 現在ギルド内のいずれかのVCにいるメンバー（Bot以外）の名前リストを取得
+   */
+  getVoiceChannelMembers() {
+    if (!this.guild) return [];
+    const members = [];
+    this.guild.channels.cache.forEach(channel => {
+      if (channel.isVoiceBased()) {
+        channel.members.forEach(member => {
+          if (!member.user.bot) {
+            members.push(member.displayName || member.user.username);
+          }
+        });
+      }
+    });
+    return members;
+  }
+
+  /**
+   * Botを最初のVCに入室させる（サーバーアイコンにマークをつけるため）
+   */
+  async joinFirstVoiceChannel() {
+    if (!this.guild) return;
+
+    // 人がいないVCを探す
+    const vc = this.guild.channels.cache.find(c => c.isVoiceBased() && c.members.size === 0);
+    if (!vc) {
+      console.log('⚠️ 空のボイスチャンネルが見つからないためBotを入室できません');
+      return;
+    }
+
+    try {
+      joinVoiceChannel({
+        channelId: vc.id,
+        guildId: this.guild.id,
+        adapterCreator: this.guild.voiceAdapterCreator,
+      });
+      console.log(`🔊 サーバー通話中アイコンを表示するため ${vc.name} に入室しました`);
+    } catch (e) {
+      console.error('Bot VC入室エラー:', e.message);
+    }
+  }
+
+  /**
+   * BotをVCから退出させる
+   */
+  leaveVoiceChannel() {
+    if (!this.guild) return;
+    const connection = getVoiceConnection(this.guild.id);
+    if (connection) {
+      connection.destroy();
+      console.log('🔇 BotがVCから退出しました');
+    }
+  }
+
+  /**
+   * Botのステータス表示（アクティビティ）を更新
+   */
+  updateActivity(activeUsers) {
+    if (!this.ready) return;
+    const count = activeUsers.length;
+    if (count > 0) {
+      this.client.user.setActivity(`🟢 ${count}人が通話可能`, { type: ActivityType.Custom });
+    } else {
+      this.client.user.setActivity(); // クリア
+    }
+  }
+
+  // --- Embed管理 ---
+
   async _findOrCreateStatusMessage() {
     try {
       const messages = await this.channel.messages.fetch({ limit: 50 });
@@ -69,6 +178,14 @@ class DiscordBot {
       if (botMessage) {
         this.statusMessageId = botMessage.id;
         console.log('📋 既存のステータスメッセージを発見');
+        if (!botMessage.pinned) {
+          try {
+            await botMessage.pin();
+            console.log('📌 既存のステータスメッセージをピン留めしました');
+          } catch (e) {
+            console.error('ピン留めエラー:', e.message);
+          }
+        }
       } else {
         await this._createNewStatusMessage([]);
         console.log('📋 新しいステータスメッセージを作成');
@@ -79,31 +196,25 @@ class DiscordBot {
     }
   }
 
-  /**
-   * 新しいステータス Embed メッセージを作成
-   */
   async _createNewStatusMessage(activeUsers) {
     const embed = this._buildEmbed(activeUsers);
     const msg = await this.channel.send({ embeds: [embed] });
     this.statusMessageId = msg.id;
+    try {
+      await msg.pin();
+      console.log('📌 新しいステータスメッセージをピン留めしました');
+    } catch (e) {
+      console.error('ピン留めエラー:', e.message);
+    }
   }
 
-  /**
-   * ステータスボード Embed を構築
-   */
   _buildEmbed(activeUsers) {
     const hasUsers = activeUsers.length > 0;
     const hasNotified = activeUsers.some((u) => u.state === 'ON_NOTIFIED');
 
-    // 状態に応じた色
-    let color;
-    if (hasNotified) {
-      color = 0xFEE75C; // 黄色（通知あり）
-    } else if (hasUsers) {
-      color = 0x57F287; // 緑（待機中）
-    } else {
-      color = 0x2B2D31; // ダーク（誰もいない）
-    }
+    let color = 0x2B2D31; // ダーク（誰もいない）
+    if (hasNotified) color = 0xFEE75C; // 黄色（通知あり）
+    else if (hasUsers) color = 0x57F287; // 緑（待機中）
 
     const embed = new EmbedBuilder()
       .setTitle('🎮 通話ステータスボード')
@@ -112,18 +223,35 @@ class DiscordBot {
 
     if (!hasUsers) {
       embed.setDescription(
-        '```\n' +
-        '  待機中のメンバーはいません\n' +
-        '```\n' +
-        '*LINEでスタンプを送ってステータスをONにしよう！*'
+        '```\n  待機中のメンバーはいません\n```\n' +
+        '*LINEでスタンプを送ってステータスをONにしよう！*\n' +
+        '*公式LINEのリッチメニューから「作業」「聞き専」も選べるよ！*'
       );
     } else {
       const lines = activeUsers.map((user) => {
-        const icon = user.state === 'ON_NOTIFIED' ? '🔔' : '🟢';
-        const label =
-          user.state === 'ON_NOTIFIED'
-            ? '通話したい！来て！'
-            : '通話来たら入るよ！';
+        let icon = '🟢';
+        let label = 'なんでもOK！';
+        
+        switch (user.state) {
+          case 'ON_WORK':
+            icon = '💻';
+            label = '作業中（無言多め）';
+            break;
+          case 'ON_LISTEN':
+            icon = '🎧';
+            label = '聞き専（チャット参加）';
+            break;
+          case 'ON_NOTIFIED':
+            icon = '🔔';
+            label = '通話したい！来て！';
+            break;
+          case 'ON_ANY':
+          default:
+            icon = '🟢';
+            label = '通話来たら入るよ！';
+            break;
+        }
+
         const time = new Date(user.startedAt).toLocaleTimeString('ja-JP', {
           hour: '2-digit',
           minute: '2-digit',
@@ -145,14 +273,10 @@ class DiscordBot {
     return embed;
   }
 
-  /**
-   * @here 通知を送信
-   */
   async sendNotification(userId, displayName) {
     if (!this.ready || !this.channel) return;
 
     try {
-      // すでに送信済みの通知があれば削除
       if (this.notificationMessages.has(userId)) {
         await this.deleteNotification(userId);
       }
@@ -165,6 +289,7 @@ class DiscordBot {
       const msg = await this.channel.send({
         content: '@here',
         embeds: [embed],
+        allowedMentions: { parse: ['everyone'] }, // 確実にメンションを飛ばす
       });
 
       this.notificationMessages.set(userId, msg.id);
@@ -174,12 +299,8 @@ class DiscordBot {
     }
   }
 
-  /**
-   * 特定のユーザーの通知メッセージを削除
-   */
   async deleteNotification(userId) {
     if (!this.ready || !this.channel) return;
-
     const msgId = this.notificationMessages.get(userId);
     if (!msgId) return;
 
@@ -196,11 +317,8 @@ class DiscordBot {
     }
   }
 
-  /**
-   * 非アクティブなユーザーの通知メッセージを整理・全削除
-   */
   async cleanupNotifications(activeUsers) {
-    const activeUserIds = new Set(activeUsers.map((u) => u.lineUserId));
+    const activeUserIds = new Set(activeUsers.map((u) => u.userId));
     for (const [userId] of this.notificationMessages.entries()) {
       if (!activeUserIds.has(userId)) {
         await this.deleteNotification(userId);
@@ -208,28 +326,37 @@ class DiscordBot {
     }
   }
 
-  /**
-   * ステータス Embed を更新
-   */
   async updateEmbed(activeUsers) {
     if (!this.ready || !this.channel) return;
 
-    // OFFになったユーザーの @here 通知を自動削除
+    // Botのステータスアクティビティ更新
+    this.updateActivity(activeUsers);
+
+    // VCの入退室制御（ステータスONが1人以上なら入り、0なら出る）
+    // ただし、既に誰かユーザーがVCにいる場合は邪魔になるので入らない
+    const hasUsers = activeUsers.length > 0;
+    if (hasUsers && this.getVoiceChannelMembers().length === 0) {
+      this.joinFirstVoiceChannel();
+    } else if (!hasUsers) {
+      this.leaveVoiceChannel();
+    }
+
     await this.cleanupNotifications(activeUsers);
 
-    try {
-      const message = await this.channel.messages.fetch(this.statusMessageId);
-      const embed = this._buildEmbed(activeUsers);
-      await message.edit({ embeds: [embed] });
-    } catch (e) {
-      console.error('Embed更新エラー:', e.message);
-      // メッセージが削除されていた場合は再作成
+    if (this.statusMessageId) {
       try {
-        await this._createNewStatusMessage(activeUsers);
-        console.log('📋 ステータスメッセージを再作成');
-      } catch (e2) {
-        console.error('Embed再作成エラー:', e2.message);
+        const oldMsg = await this.channel.messages.fetch(this.statusMessageId);
+        if (oldMsg) await oldMsg.delete();
+      } catch (e) {
+        // ignore
       }
+      this.statusMessageId = null;
+    }
+
+    try {
+      await this._createNewStatusMessage(activeUsers);
+    } catch (e) {
+      console.error('Embed再投稿エラー:', e.message);
     }
   }
 }

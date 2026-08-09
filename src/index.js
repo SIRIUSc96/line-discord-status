@@ -2,7 +2,7 @@ const express = require('express');
 const config = require('./config');
 const StatusManager = require('./statusManager');
 const DiscordBot = require('./discordBot');
-const { createLineHandler } = require('./lineHandler');
+const { createLineHandler, sendLinePush } = require('./lineHandler');
 
 async function main() {
   console.log('');
@@ -14,6 +14,19 @@ async function main() {
   // --- コンポーネント初期化 ---
   const statusManager = new StatusManager(config);
   const discordBot = new DiscordBot(config);
+
+  // VCに誰かが入室した時の処理 (LINEへPush通知)
+  discordBot.onVoiceJoin(async (memberName, channelName) => {
+    const activeUsers = statusManager.getActiveUsers();
+    if (activeUsers.length === 0) return;
+
+    // ステータスがONになっている全ユーザーのIDを取得
+    const userIds = activeUsers.map(u => u.userId);
+    const text = `🎙️ 【Discord入室通知】\n${memberName} がボイスチャット「${channelName}」に入室しました！`;
+
+    console.log(`LINEへPush通知を送信します: 対象 ${userIds.length} 人`);
+    await sendLinePush(config.line.channelAccessToken, userIds, text);
+  });
 
   // Discord Bot 起動
   try {
