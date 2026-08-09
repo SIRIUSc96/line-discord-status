@@ -27,10 +27,17 @@ class DiscordBot {
   async start() {
     return new Promise((resolve, reject) => {
       // 接続状況のデバッグログを出力
-      this.client.on('debug', console.log);
+      this.client.on('debug', (info) => {
+        // 多すぎるハートビートログ等は間引いて重要ログのみ出す
+        if (info.includes('Heartbeat') || info.includes('ping')) return;
+        console.log(`[Discord Debug] ${info}`);
+      });
 
+      this.client.on('warn', (warn) => console.warn(`[Discord Warn] ${warn}`));
+      this.client.on('invalidated', () => console.error('[Discord Error] セッションが無効化されました'));
+      
       this.client.once(Events.ClientReady, async () => {
-        console.log(`✅ Discord Bot ログイン: ${this.client.user.tag}`);
+        console.log(`✅ Discord Bot ログイン成功: ${this.client.user.tag}`);
 
         try {
           this.channel = await this.client.channels.fetch(this.config.discord.channelId);
@@ -46,6 +53,7 @@ class DiscordBot {
           this.ready = true;
           resolve();
         } catch (e) {
+          console.error('❌ Discord Bot チャンネルフェッチ/メッセージ作成エラー:', e);
           reject(e);
         }
       });
@@ -56,10 +64,14 @@ class DiscordBot {
       });
 
       this.client.on('error', (error) => {
-        console.error('Discord Bot エラー:', error.message);
+        console.error('❌ Discord Bot クライアントエラー:', error);
       });
 
-      this.client.login(this.config.discord.botToken).catch(reject);
+      console.log('🔑 client.login() を実行中...');
+      this.client.login(this.config.discord.botToken).catch((err) => {
+        console.error('❌ client.login() で拒否されました:', err);
+        reject(err);
+      });
     });
   }
 

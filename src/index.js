@@ -2,6 +2,7 @@ const express = require('express');
 const dns = require('dns');
 if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first'); // Render (Node >=17) でのDiscord Gateway接続ハングアップを修正
+  console.log('🌐 Node.js DNS: IPv4 First に設定しました');
 }
 const config = require('./config');
 const StatusManager = require('./statusManager');
