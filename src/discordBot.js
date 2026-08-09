@@ -12,6 +12,13 @@ class DiscordBot {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildVoiceStates, // VCの入退室監視と接続に必要
       ],
+      rest: {
+        timeout: 15000,
+        retries: 3,
+      },
+      ws: {
+        timeout: 10000, // WebSocket接続タイムアウトを10秒に設定
+      },
     });
     this.statusMessageId = null;
     this.channel = null;
@@ -73,7 +80,20 @@ class DiscordBot {
 
       const token = (this.config.discord.botToken || '').trim();
       console.log(`🔑 client.login() を実行中... (Token長: ${token.length})`);
+      
+      // 15秒間ログインが完了しなかった場合のセイフティタイムアウト
+      const loginTimer = setTimeout(() => {
+        console.error('⚠️ Discord Gateway 接続が15秒間応答しなかったため、再接続を試みます...');
+        this.client.destroy();
+        this.client.login(token).catch(console.error);
+      }, 15000);
+
+      this.client.once(Events.ClientReady, () => {
+        clearTimeout(loginTimer);
+      });
+
       this.client.login(token).catch((err) => {
+        clearTimeout(loginTimer);
         console.error('❌ client.login() で拒否されました:', err);
         reject(err);
       });
