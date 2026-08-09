@@ -1,5 +1,4 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
-const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
 
 /**
  * Discord Bot の管理
@@ -118,23 +117,22 @@ class DiscordBot {
    */
   async joinFirstVoiceChannel() {
     if (!this.guild) return;
-
-    // 人がいないVCを探す
-    const vc = this.guild.channels.cache.find(c => c.isVoiceBased() && c.members.size === 0);
-    if (!vc) {
-      console.log('⚠️ 空のボイスチャンネルが見つからないためBotを入室できません');
-      return;
-    }
+    const vc = this.guild.channels.cache.find(c => c.type === 2); // 2: GuildVoice
+    if (!vc) return;
 
     try {
-      joinVoiceChannel({
-        channelId: vc.id,
-        guildId: this.guild.id,
-        adapterCreator: this.guild.voiceAdapterCreator,
+      this.guild.shard.send({
+        op: 4,
+        d: {
+          guild_id: this.guild.id,
+          channel_id: vc.id,
+          self_mute: false,
+          self_deaf: true
+        }
       });
-      console.log(`🔊 サーバー通話中アイコンを表示するため ${vc.name} に入室しました`);
+      console.log(`🎙️ ボイスチャット ${vc.name} に入室しました (Gateway)`);
     } catch (e) {
-      console.error('Bot VC入室エラー:', e.message);
+      console.error('VC入室エラー:', e);
     }
   }
 
@@ -143,10 +141,19 @@ class DiscordBot {
    */
   leaveVoiceChannel() {
     if (!this.guild) return;
-    const connection = getVoiceConnection(this.guild.id);
-    if (connection) {
-      connection.destroy();
-      console.log('🔇 BotがVCから退出しました');
+    try {
+      this.guild.shard.send({
+        op: 4,
+        d: {
+          guild_id: this.guild.id,
+          channel_id: null,
+          self_mute: false,
+          self_deaf: false
+        }
+      });
+      console.log(`🔇 ボイスチャットから退出しました (Gateway)`);
+    } catch (e) {
+      console.error('VC退出エラー:', e);
     }
   }
 
