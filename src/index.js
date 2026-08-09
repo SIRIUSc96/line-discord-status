@@ -1,4 +1,8 @@
 const express = require('express');
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first'); // Render (Node >=17) でのDiscord Gateway接続ハングアップを修正
+}
 const config = require('./config');
 const StatusManager = require('./statusManager');
 const DiscordBot = require('./discordBot');
