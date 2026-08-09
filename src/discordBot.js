@@ -26,9 +26,13 @@ class DiscordBot {
    */
   async start() {
     return new Promise((resolve, reject) => {
+      // Shard / WebSocket の接続状態をログに出力
+      this.client.on('shardError', (error, shardId) => console.error(`❌ Shard ${shardId} エラー:`, error));
+      this.client.on('shardDisconnect', (event, shardId) => console.warn(`⚠️ Shard ${shardId} 切断:`, event));
+      this.client.on('shardReconnecting', (shardId) => console.log(`🔄 Shard ${shardId} 再接続中...`));
+
       // 接続状況のデバッグログを出力
       this.client.on('debug', (info) => {
-        // 多すぎるハートビートログ等は間引いて重要ログのみ出す
         if (info.includes('Heartbeat') || info.includes('ping')) return;
         console.log(`[Discord Debug] ${info}`);
       });
@@ -40,7 +44,7 @@ class DiscordBot {
         console.log(`✅ Discord Bot ログイン成功: ${this.client.user.tag}`);
 
         try {
-          this.channel = await this.client.channels.fetch(this.config.discord.channelId);
+          this.channel = await this.client.channels.fetch(this.config.discord.channelId.trim());
           if (!this.channel) {
             throw new Error(`チャンネル ${this.config.discord.channelId} が見つかりません`);
           }
@@ -67,8 +71,9 @@ class DiscordBot {
         console.error('❌ Discord Bot クライアントエラー:', error);
       });
 
-      console.log('🔑 client.login() を実行中...');
-      this.client.login(this.config.discord.botToken).catch((err) => {
+      const token = (this.config.discord.botToken || '').trim();
+      console.log(`🔑 client.login() を実行中... (Token長: ${token.length})`);
+      this.client.login(token).catch((err) => {
         console.error('❌ client.login() で拒否されました:', err);
         reject(err);
       });
