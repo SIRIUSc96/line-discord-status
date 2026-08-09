@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Events } = require('discord.js');
 
 /**
  * Discord Bot の管理
@@ -26,7 +26,10 @@ class DiscordBot {
    */
   async start() {
     return new Promise((resolve, reject) => {
-      this.client.once('ready', async () => {
+      // 接続状況のデバッグログを出力
+      this.client.on('debug', console.log);
+
+      this.client.once(Events.ClientReady, async () => {
         console.log(`✅ Discord Bot ログイン: ${this.client.user.tag}`);
 
         try {
