@@ -1,9 +1,34 @@
 const express = require('express');
 const dns = require('dns');
+const net = require('net');
+const tls = require('tls');
+
+// Render (Linux Node 18+) 環境で Discord Gateway (WSS) 接続がハングアップする問題を解決
 if (dns.setDefaultResultOrder) {
-  dns.setDefaultResultOrder('ipv4first'); // Render (Node >=17) でのDiscord Gateway接続ハングアップを修正
-  console.log('🌐 Node.js DNS: IPv4 First に設定しました');
+  dns.setDefaultResultOrder('ipv4first');
 }
+
+const patchConnectArgs = (args) => {
+  if (typeof args[0] === 'object' && args[0] !== null) {
+    args[0].family = 4;
+  } else if (typeof args[1] === 'object' && args[1] !== null) {
+    args[1].family = 4;
+  }
+};
+
+const origNetConnect = net.connect;
+net.connect = function (...args) {
+  patchConnectArgs(args);
+  return origNetConnect.apply(this, args);
+};
+
+const origTlsConnect = tls.connect;
+tls.connect = function (...args) {
+  patchConnectArgs(args);
+  return origTlsConnect.apply(this, args);
+};
+
+console.log('🌐 Node.js Net/TLS: IPv4 ソケット接続パッチ適用完了');
 const config = require('./config');
 const StatusManager = require('./statusManager');
 const DiscordBot = require('./discordBot');
