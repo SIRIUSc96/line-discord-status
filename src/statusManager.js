@@ -109,7 +109,7 @@ class StatusManager {
     user.lineDisplayName = lineDisplayName;
     user.discordDisplayName = displayName;
 
-    // --- テキストによる明示的な状態指定 ---
+    // --- テキストによる明示的な削除指定 ---
     if (type === 'TEXT_OFF') {
       user.state = 'OFF';
       user.count = 0;
@@ -118,62 +118,50 @@ class StatusManager {
       return { action: 'OFF', displayName };
     }
 
-    if (type.startsWith('TEXT_')) {
-      const newState = type.replace('TEXT_', 'ON_');
-      
-      // すでにその状態で、なおかつ1時間以内なら何もしない（あるいはカウントリセット等）
-      // 今回は純粋に状態を上書きし、タイマーをリセットする
-      user.state = newState;
+    // --- ボタンまたはスタンプによる状態更新 ---
+    let targetState = 'ON_ANY';
+    if (type === 'TEXT_WORK') targetState = 'ON_WORK';
+    else if (type === 'TEXT_LISTEN') targetState = 'ON_LISTEN';
+    else if (type === 'TEXT_ANY') targetState = 'ON_ANY';
+    else if (type === 'STAMP') {
+      targetState = (user.state && user.state !== 'OFF') ? user.state : 'ON_ANY';
+    }
+
+    // OFF または 1時間ウィンドウ外の場合 → 新規ON (count = 1)
+    const elapsed = now - user.startedAt;
+    if (user.state === 'OFF' || elapsed > windowMs) {
+      user.state = targetState;
       user.count = 1;
       user.startedAt = now;
       this._save();
-      return { action: newState, displayName };
+      return { action: targetState, displayName };
     }
 
-    // --- スタンプによる状態遷移（従来互換） ---
-    if (type === 'STAMP') {
-      if (user.state === 'OFF') {
-        user.state = 'ON_ANY';
-        user.count = 1;
-        user.startedAt = now;
-        this._save();
-        return { action: 'ON_ANY', displayName };
-      }
-
-      // 1時間ウィンドウ外なら、状態リセットしてON_ANYにする
-      const elapsed = now - user.startedAt;
-      if (elapsed > windowMs) {
-        user.state = 'ON_ANY';
-        user.count = 1;
-        user.startedAt = now;
-        this._save();
-        return { action: 'ON_ANY', displayName };
-      }
-
-      // 1時間ウィンドウ内
-      user.count += 1;
-      let action = 'NONE';
-
-      if (user.count === 2) {
-        // 2回目で通知
-        user.state = 'ON_NOTIFIED';
-        action = 'NOTIFY';
-      } else if (user.count === 3) {
-        // 3回目は変化なし
-        action = 'NONE';
-      } else {
-        // 4回目でOFF
-        user.state = 'OFF';
-        user.count = 0;
-        user.startedAt = 0;
-        action = 'OFF';
-      }
-
-      this._save();
-      return { action, displayName };
+    // 1時間ウィンドウ内の連続操作 (2回目、3回目、4回目...)
+    user.count += 1;
+    // リッチメニューのボタンで新しい状態（例:作業→聞き専）が送られてきた場合は状態を更新
+    if (type.startsWith('TEXT_')) {
+      user.state = targetState;
     }
 
-    return { action: 'NONE', displayName };
+    let action = 'NONE';
+    if (user.count === 2) {
+      // 2回目で通知
+      user.state = 'ON_NOTIFIED';
+      action = 'NOTIFY';
+    } else if (user.count === 3) {
+      // 3回目は変化なし
+      action = 'NONE';
+    } else {
+      // 4回目以上でOFF
+      user.state = 'OFF';
+      user.count = 0;
+      user.startedAt = 0;
+      action = 'OFF';
+    }
+
+    this._save();
+    return { action, displayName };
   }
 
   // --- ステータス照会 ---

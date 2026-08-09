@@ -127,7 +127,7 @@ function createLineHandler(config, statusManager, discordBot) {
         if (text === 'なんでも') updateType = 'TEXT_ANY';
         else if (text === '作業') updateType = 'TEXT_WORK';
         else if (text === '聞き専') updateType = 'TEXT_LISTEN';
-        else if (text === '通知削除') updateType = 'TEXT_OFF';
+        else if (text === '通知削除' || text === '削除' || text.includes('削除')) updateType = 'TEXT_OFF';
       }
 
       if (!updateType) {
@@ -155,23 +155,23 @@ function createLineHandler(config, statusManager, discordBot) {
       switch (result.action) {
         case 'ON_ANY':
           await discordBot.updateEmbed(activeUsers);
-          replyText = '🟢 通話ステータスを【なんでも】にしました！\n※スタンプを押すと @here 通知を送れます。';
+          replyText = '🟢 通話ステータスを【なんでも】にしました！\n※1時間以内にもう一度ボタンまたはスタンプを押すと @here 通知を送れます。';
           break;
 
         case 'ON_WORK':
           await discordBot.updateEmbed(activeUsers);
-          replyText = '💻 通話ステータスを【作業】にしました！';
+          replyText = '💻 通話ステータスを【作業】にしました！\n※1時間以内にもう一度ボタンまたはスタンプを押すと @here 通知を送れます。';
           break;
 
         case 'ON_LISTEN':
           await discordBot.updateEmbed(activeUsers);
-          replyText = '🎧 通話ステータスを【聞き専】にしました！';
+          replyText = '🎧 通話ステータスを【聞き専】にしました！\n※1時間以内にもう一度ボタンまたはスタンプを押すと @here 通知を送れます。';
           break;
 
         case 'NOTIFY':
           await discordBot.sendNotification(userId, result.displayName);
           await discordBot.updateEmbed(activeUsers);
-          replyText = '🔔 Discordに @here 通知を送信しました！（通話呼びかけ中）\n※あと2回スタンプを送るとステータスを取り消せます。';
+          replyText = '🔔 Discordに @here 通知を送信しました！（通話呼びかけ中）\n※あと2回操作でステータスを取り消せます。';
           break;
 
         case 'OFF':
@@ -180,7 +180,7 @@ function createLineHandler(config, statusManager, discordBot) {
           break;
 
         case 'NONE':
-          replyText = '💬 ステータス変更はありません。（現在通知済み状態です。あと1回スタンプでOFFになります）';
+          replyText = '💬 ステータス変更はありません。（現在通知済み状態です。あと1回操作でOFFになります）';
           break;
       }
 
