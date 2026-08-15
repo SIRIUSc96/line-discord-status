@@ -157,8 +157,11 @@ class DiscordBot {
    */
   async joinFirstVoiceChannel() {
     if (!this.guild) return;
-    const vc = this.guild.channels.cache.find(c => c.type === 2); // 2: GuildVoice
-    if (!vc) return;
+    const vc = this.guild.channels.cache.find(c => c.type === 2 && c.name === '集いの広場');
+    if (!vc) {
+      console.log('⚠️ ボイスチャンネル「集いの広場」が見つかりません');
+      return;
+    }
 
     try {
       this.guild.shard.send({
