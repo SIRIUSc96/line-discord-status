@@ -184,6 +184,14 @@ class StatusManager {
     return active;
   }
 
+  /**
+   * 過去にBotとやり取りしたことがある全ユーザーのIDリストを取得
+   * （VC入室通知の送信先として使用）
+   */
+  getAllKnownUserIds() {
+    return Object.keys(this.users).filter(id => !id.startsWith('_'));
+  }
+
   // --- 自動タイムアウト ---
 
   /**

@@ -45,17 +45,15 @@ async function main() {
   const statusManager = new StatusManager(config);
   const discordBot = new DiscordBot(config);
 
-  // VCに誰かが入室した時の処理 (LINEへPush通知)
+  // VCに誰かが入室した時の処理 (LINEへPush通知 - 全ユーザーに送信)
   discordBot.onVoiceJoin(async (memberName, channelName) => {
-    const activeUsers = statusManager.getActiveUsers();
-    if (activeUsers.length === 0) return;
+    const allUserIds = statusManager.getAllKnownUserIds();
+    if (allUserIds.length === 0) return;
 
-    // ステータスがONになっている全ユーザーのIDを取得
-    const userIds = activeUsers.map(u => u.userId);
     const text = `🎙️ 【Discord入室通知】\n${memberName} がボイスチャット「${channelName}」に入室しました！`;
 
-    console.log(`LINEへPush通知を送信します: 対象 ${userIds.length} 人`);
-    await sendLinePush(config.line.channelAccessToken, userIds, text);
+    console.log(`LINEへPush通知を送信します: 対象 ${allUserIds.length} 人（全ユーザー）`);
+    await sendLinePush(config.line.channelAccessToken, allUserIds, text);
   });
 
   // --- Express サーバー ---
