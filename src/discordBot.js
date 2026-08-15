@@ -114,10 +114,10 @@ class DiscordBot {
       console.log(`🎙️ ${memberName} が ${channel.name} に入室しました`);
 
       // もしBotがそのVCにいる場合、ユーザーが入ってきたので退出する（邪魔にならないように）
-      const connection = getVoiceConnection(newState.guild.id);
-      if (connection && connection.joinConfig.channelId === newState.channelId) {
+      const botVoiceState = this.guild?.members?.me?.voice;
+      if (botVoiceState && botVoiceState.channelId === newState.channelId) {
         console.log('🚪 ユーザーが入室したため、BotはVCから退出します');
-        connection.destroy();
+        this.leaveVoiceChannel();
       }
 
       // 登録されたコールバックがあれば実行（LINEへのPush通知など）
