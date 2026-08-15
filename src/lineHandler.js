@@ -124,6 +124,33 @@ function createLineHandler(config, statusManager, discordBot) {
         updateType = 'STAMP';
       } else if (event.message.type === 'text') {
         const text = event.message.text.trim();
+
+        // 使い方・ヘルプの表示（ステータス変更ではないので先に処理して次のイベントへ）
+        if (text === '使い方' || text === 'ヘルプ' || text === 'help') {
+          const guide =
+            '🎮 HALF 通話ステータスボード 使い方\n' +
+            '━━━━━━━━━━━━━━━━\n' +
+            '\n' +
+            '【ステータスの設定】\n' +
+            '🟢 なんでも → 通話OK！なんでも来て！\n' +
+            '💻 作業 → 作業中（無言多め）\n' +
+            '🎧 聞き専 → 聞いてるだけ（チャット参加）\n' +
+            '🗑️ 削除 → ステータスを取り消す\n' +
+            '📝 スタンプ → 「なんでも」でON\n' +
+            '\n' +
+            '【@here 通知の送り方】\n' +
+            'ステータスON後、1時間以内にもう一度ボタンかスタンプを押すと、Discordに @here 通知が飛びます。\n' +
+            '\n' +
+            '【VC入室通知】\n' +
+            '誰かがDiscordのボイスチャットに入ると、LINEに自動通知が届きます。\n' +
+            '\n' +
+            '【自動OFF】\n' +
+            'ステータスは1時間で自動OFFになります。';
+
+          await sendLineReply(config.line.channelAccessToken, replyToken, guide);
+          continue;
+        }
+
         if (text === 'なんでも') updateType = 'TEXT_ANY';
         else if (text === '作業') updateType = 'TEXT_WORK';
         else if (text === '聞き専') updateType = 'TEXT_LISTEN';
