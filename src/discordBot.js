@@ -393,14 +393,21 @@ class DiscordBot {
 
     await this.cleanupNotifications(activeUsers);
 
+    const embed = this._buildEmbed(activeUsers);
+
+    // 既存メッセージがあれば編集、なければ新規作成
     if (this.statusMessageId) {
       try {
         const oldMsg = await this.channel.messages.fetch(this.statusMessageId);
-        if (oldMsg) await oldMsg.delete();
+        if (oldMsg) {
+          await oldMsg.edit({ embeds: [embed] });
+          return; // 編集成功したので終了
+        }
       } catch (e) {
-        // ignore
+        // メッセージが見つからない場合は新規作成にフォールバック
+        console.log('📋 既存メッセージが見つからないため新規作成します');
+        this.statusMessageId = null;
       }
-      this.statusMessageId = null;
     }
 
     try {
