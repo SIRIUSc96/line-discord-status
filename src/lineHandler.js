@@ -141,8 +141,8 @@ function createLineHandler(config, statusManager, discordBot) {
             '【@here 通知の送り方】\n' +
             'ステータスON後、1時間以内にもう一度ボタンかスタンプを押すと、Discordに @here 通知が飛びます。\n' +
             '\n' +
-            '【VC入室通知】\n' +
-            '誰かがDiscordのボイスチャットに入ると、LINEに自動通知が届きます。\n' +
+            '【通話開始通知】\n' +
+            '誰か2人がDiscordのボイスチャットに入ると、LINEに自動で「通話開始」の通知が届きます。\n' +
             '\n' +
             '【自動OFF】\n' +
             'ステータスは1時間で自動OFFになります。';

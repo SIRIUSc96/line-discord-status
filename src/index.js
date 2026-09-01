@@ -45,14 +45,15 @@ async function main() {
   const statusManager = new StatusManager(config);
   const discordBot = new DiscordBot(config);
 
-  // VCに誰かが入室した時の処理 (LINEへPush通知 - 全ユーザーに送信)
-  discordBot.onVoiceJoin(async (memberName, channelName) => {
+  // 2人以上の通話が開始された時の処理 (LINEへPush通知 - 全ユーザーに送信)
+  discordBot.onVoiceStart(async (memberNames, channelName) => {
     const allUserIds = statusManager.getAllKnownUserIds();
     if (allUserIds.length === 0) return;
 
-    const text = `🎙️ 【Discord入室通知】\n${memberName} がボイスチャット「${channelName}」に入室しました！`;
+    const namesStr = memberNames.join(' と ');
+    const text = `🎙️ 【通話開始】\n${namesStr} が「${channelName}」で通話を始めました！`;
 
-    console.log(`LINEへPush通知を送信します: 対象 ${allUserIds.length} 人（全ユーザー）`);
+    console.log(`LINEへPush通知を送信します: 対象 ${allUserIds.length} 人（通話開始: ${namesStr}）`);
     await sendLinePush(config.line.channelAccessToken, allUserIds, text);
   });
 

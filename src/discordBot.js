@@ -25,7 +25,8 @@ class DiscordBot {
     this.guild = null;
     this.ready = false;
     this.notificationMessages = new Map(); // lineUserId -> messageId
-    this.onVoiceJoinCallback = null; // VC入室時に呼ばれるコールバック
+    this.onVoiceStartCallback = null; // 2人通話開始時に呼ばれるコールバック
+    this.notifiedChannels = new Set(); // 通話開始通知済みのチャンネルID
   }
 
   /**
@@ -107,31 +108,50 @@ class DiscordBot {
     // Bot自身の移動は無視
     if (newState.member?.user?.bot) return;
 
-    // 前はどこにも入っていなくて、新しくVCに入った（入室）
-    if (!oldState.channelId && newState.channelId) {
-      const channel = newState.channel;
-      const memberName = newState.member?.displayName || newState.member?.user?.username || '誰か';
-      console.log(`🎙️ ${memberName} が ${channel.name} に入室しました`);
-
-      // もしBotがそのVCにいる場合、ユーザーが入ってきたので退出する（邪魔にならないように）
+    // ユーザーが入室または移動してきた場合、BotがそのVCにいるなら退出
+    if (newState.channelId) {
       const botVoiceState = this.guild?.members?.me?.voice;
       if (botVoiceState && botVoiceState.channelId === newState.channelId) {
         console.log('🚪 ユーザーが入室したため、BotはVCから退出します');
         this.leaveVoiceChannel();
       }
+    }
 
-      // 登録されたコールバックがあれば実行（LINEへのPush通知など）
-      if (this.onVoiceJoinCallback) {
-        this.onVoiceJoinCallback(memberName, channel.name);
+    // 退室したチャンネルの人数チェック -> 0人になったら通知フラグをリセット
+    if (oldState.channel && oldState.channelId !== newState.channelId) {
+      const remainingHumans = oldState.channel.members.filter(m => !m.user.bot);
+      if (remainingHumans.size === 0) {
+        if (this.notifiedChannels.has(oldState.channelId)) {
+          this.notifiedChannels.delete(oldState.channelId);
+          console.log(`🔇 ${oldState.channel.name} の通話が終了したため、通知フラグをリセットしました`);
+        }
+      }
+    }
+
+    // 入室または移動先チャンネルの人数チェック
+    if (newState.channel) {
+      const humanMembers = newState.channel.members.filter(m => !m.user.bot);
+      const memberNames = humanMembers.map(m => m.displayName || m.user.username);
+
+      console.log(`🎙️ ${newState.channel.name} 現在の人数: ${humanMembers.size}人 (${memberNames.join(', ')})`);
+
+      // 2人になった瞬間に、まだ通知していない場合は通話開始通知を送る
+      if (humanMembers.size === 2 && !this.notifiedChannels.has(newState.channelId)) {
+        this.notifiedChannels.add(newState.channelId);
+        console.log(`🔔 ${newState.channel.name} で2人の通話が開始されました: ${memberNames.join(' と ')}`);
+
+        if (this.onVoiceStartCallback) {
+          this.onVoiceStartCallback(memberNames, newState.channel.name);
+        }
       }
     }
   }
 
   /**
-   * コールバックの登録
+   * コールバックの登録 (2人通話開始時)
    */
-  onVoiceJoin(callback) {
-    this.onVoiceJoinCallback = callback;
+  onVoiceStart(callback) {
+    this.onVoiceStartCallback = callback;
   }
 
   /**
