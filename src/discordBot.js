@@ -108,11 +108,12 @@ class DiscordBot {
     // Bot自身の移動は無視
     if (newState.member?.user?.bot) return;
 
-    // ユーザーが入室または移動してきた場合、BotがそのVCにいるなら退出
+    // ユーザーがどこかのVCに入室・移動した場合、BotがいずれかのVCにいるなら退出
+    // （人間がVCにいればサーバーアイコンに通話マークが付くので、Botは不要になる）
     if (newState.channelId) {
       const botVoiceState = this.guild?.members?.me?.voice;
-      if (botVoiceState && botVoiceState.channelId === newState.channelId) {
-        console.log('🚪 ユーザーが入室したため、BotはVCから退出します');
+      if (botVoiceState && botVoiceState.channelId) {
+        console.log(`🚪 ユーザーが ${newState.channel?.name} に入室したため、BotはVCから退出します`);
         this.leaveVoiceChannel();
       }
     }
