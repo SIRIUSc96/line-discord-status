@@ -68,7 +68,7 @@ async function sendLineReply(accessToken, replyToken, text) {
 async function sendLinePush(accessToken, userIds, text) {
   if (!userIds || userIds.length === 0) return;
   try {
-    await fetch('https://api.line.me/v2/bot/message/multicast', {
+    const res = await fetch('https://api.line.me/v2/bot/message/multicast', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -84,8 +84,44 @@ async function sendLinePush(accessToken, userIds, text) {
         ],
       }),
     });
+    if (!res.ok) {
+      console.error(`LINE Push失敗: ${res.status} ${await res.text()}`);
+    }
   } catch (e) {
     console.error('LINE Pushエラー:', e.message);
+  }
+}
+
+/**
+ * 公式LINEの友だち全員へメッセージを一斉送信（ブロードキャスト）
+ * ユーザーIDの保存が不要なので、サーバー再起動でデータが消えても全員に届く
+ */
+async function sendLineBroadcast(accessToken, text) {
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/broadcast', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            type: 'text',
+            text: text,
+          },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      // 429 = 月間メッセージ上限に到達 など
+      console.error(`LINE Broadcast失敗: ${res.status} ${await res.text()}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('LINE Broadcastエラー:', e.message);
+    return false;
   }
 }
 
@@ -227,4 +263,4 @@ function createLineHandler(config, statusManager, discordBot) {
   };
 }
 
-module.exports = { createLineHandler, sendLinePush };
+module.exports = { createLineHandler, sendLinePush, sendLineBroadcast };

@@ -32,7 +32,7 @@ console.log('🌐 Node.js Net/TLS: IPv4 ソケット接続パッチ適用完了'
 const config = require('./config');
 const StatusManager = require('./statusManager');
 const DiscordBot = require('./discordBot');
-const { createLineHandler, sendLinePush } = require('./lineHandler');
+const { createLineHandler, sendLineBroadcast } = require('./lineHandler');
 
 async function main() {
   console.log('');
@@ -45,16 +45,14 @@ async function main() {
   const statusManager = new StatusManager(config);
   const discordBot = new DiscordBot(config);
 
-  // 2人以上の通話が開始された時の処理 (LINEへPush通知 - 全ユーザーに送信)
+  // 2人以上の通話が開始された時の処理 (公式LINEの友だち全員へ一斉送信)
+  // ※ Renderは再起動のたびに保存データが消えるため、ユーザーIDに頼らずブロードキャストで送る
   discordBot.onVoiceStart(async (memberNames, channelName) => {
-    const allUserIds = statusManager.getAllKnownUserIds();
-    if (allUserIds.length === 0) return;
-
     const namesStr = memberNames.join(' と ');
     const text = `🎙️ 【通話開始】\n${namesStr} が「${channelName}」で通話を始めました！`;
 
-    console.log(`LINEへPush通知を送信します: 対象 ${allUserIds.length} 人（通話開始: ${namesStr}）`);
-    await sendLinePush(config.line.channelAccessToken, allUserIds, text);
+    console.log(`LINEへ一斉送信します（通話開始: ${namesStr}）`);
+    await sendLineBroadcast(config.line.channelAccessToken, text);
   });
 
   // --- Express サーバー ---
@@ -77,6 +75,7 @@ async function main() {
     res.json({
       status: 'ok',
       service: 'LINE → Discord ステータスボード',
+      discord: discordBot.client.isReady() ? 'online' : 'offline',
       activeUsers: activeUsers.length,
       uptime: Math.floor(process.uptime()),
     });
@@ -116,6 +115,33 @@ async function main() {
       await discordBot.updateEmbed(activeUsers);
     }
   }, 60 * 1000);
+
+  // --- 自己キープアライブ（10分ごとに自分の公開URLへアクセス） ---
+  // Renderは15分アクセスがないとスリープするため、自分で自分を起こし続ける。
+  // cron-job.org が止まってもスリープしないための二重の保険。
+  const selfUrl = process.env.RENDER_EXTERNAL_URL;
+  if (selfUrl) {
+    setInterval(() => {
+      fetch(selfUrl).catch((e) => console.error('キープアライブ失敗:', e.message));
+    }, 10 * 60 * 1000);
+    console.log(`💓 キープアライブ有効: ${selfUrl}`);
+  }
+
+  // --- Discord 接続の見張り番（2分ごと） ---
+  // Discordとの接続が切れたまま6分以上戻らなければ、プロセスを終了してRenderに再起動させる
+  let discordDownChecks = 0;
+  setInterval(() => {
+    if (discordBot.client.isReady()) {
+      discordDownChecks = 0;
+      return;
+    }
+    discordDownChecks += 1;
+    console.warn(`⚠️ Discord未接続 (${discordDownChecks}/3)`);
+    if (discordDownChecks >= 3) {
+      console.error('❌ Discordへの接続が回復しないため、再起動します');
+      process.exit(1);
+    }
+  }, 2 * 60 * 1000);
 }
 
 // --- エラーハンドリング ---
