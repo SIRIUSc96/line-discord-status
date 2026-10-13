@@ -129,18 +129,21 @@ async function main() {
 
   // Discord Bot 起動 (非同期で裏で進める)
   console.log('⌛ Discord Bot にログインしています...');
-  discordBot.start().then(async () => {
-    console.log('✅ Discord Bot 起動完了！');
-    // 起動時に既存のアクティブユーザーで Embed を更新
-    const activeOnStart = statusManager.getActiveUsers();
-    if (activeOnStart.length > 0) {
-      await discordBot.updateEmbed(activeOnStart);
-      console.log(`📋 ${activeOnStart.length} 人のアクティブユーザーを復元`);
+  const tryStartDiscord = async () => {
+    try {
+      await discordBot.start();
+      console.log('✅ Discord Bot 起動完了！');
+      const activeOnStart = statusManager.getActiveUsers();
+      if (activeOnStart.length > 0) {
+        await discordBot.updateEmbed(activeOnStart);
+        console.log(`📋 ${activeOnStart.length} 人のアクティブユーザーを復元`);
+      }
+    } catch (e) {
+      console.error('⚠️ Discord Bot の起動に失敗 (5分後に再試行します):', e.message);
+      setTimeout(tryStartDiscord, 5 * 60 * 1000);
     }
-  }).catch((e) => {
-    console.error('❌ Discord Bot の起動に失敗:', e.message);
-    process.exit(1);
-  });
+  };
+  tryStartDiscord();
 
   // --- 自動タイムアウトチェック（1分ごと） ---
   setInterval(async () => {
@@ -163,22 +166,6 @@ async function main() {
     }, 10 * 60 * 1000);
     console.log(`💓 キープアライブ有効: ${selfUrl}`);
   }
-
-  // --- Discord 接続の見張り番（2分ごと） ---
-  // Discordとの接続が切れたまま6分以上戻らなければ、プロセスを終了してRenderに再起動させる
-  let discordDownChecks = 0;
-  setInterval(() => {
-    if (discordBot.client.isReady()) {
-      discordDownChecks = 0;
-      return;
-    }
-    discordDownChecks += 1;
-    console.warn(`⚠️ Discord未接続 (${discordDownChecks}/3)`);
-    if (discordDownChecks >= 3) {
-      console.error('❌ Discordへの接続が回復しないため、再起動します');
-      process.exit(1);
-    }
-  }, 2 * 60 * 1000);
 }
 
 // --- エラーハンドリング ---
