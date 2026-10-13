@@ -29,6 +29,20 @@ tls.connect = function (...args) {
 };
 
 console.log('🌐 Node.js Net/TLS: IPv4 ソケット接続パッチ適用完了');
+
+// --- 直近のログをメモリに保持（/debug で確認するため。トークンを含む行は除外） ---
+const recentLogs = [];
+for (const level of ['log', 'warn', 'error']) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    orig(...args);
+    const line = args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    if (/token/i.test(line)) return;
+    recentLogs.push(`${new Date().toISOString()} [${level}] ${line}`.slice(0, 500));
+    if (recentLogs.length > 100) recentLogs.shift();
+  };
+}
+
 const config = require('./config');
 const StatusManager = require('./statusManager');
 const DiscordBot = require('./discordBot');
@@ -78,6 +92,29 @@ async function main() {
       discord: discordBot.client.isReady() ? 'online' : 'offline',
       activeUsers: activeUsers.length,
       uptime: Math.floor(process.uptime()),
+    });
+  });
+
+  // 診断用: 直近のログと、このサーバーからDiscordへ届くかのテスト結果
+  app.get('/debug', async (_req, res) => {
+    let probe;
+    try {
+      const r = await fetch('https://discord.com/api/v10/gateway', { signal: AbortSignal.timeout(10000) });
+      probe = {
+        status: r.status,
+        retryAfter: r.headers.get('retry-after'),
+        cfRay: r.headers.get('cf-ray'),
+        body: (await r.text()).slice(0, 300),
+      };
+    } catch (e) {
+      probe = { error: e.message };
+    }
+    res.json({
+      discord: discordBot.client.isReady() ? 'online' : 'offline',
+      wsStatus: discordBot.client.ws?.status,
+      uptime: Math.floor(process.uptime()),
+      discordProbe: probe,
+      logs: recentLogs,
     });
   });
 

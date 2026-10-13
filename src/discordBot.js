@@ -47,6 +47,11 @@ class DiscordBot {
 
       this.client.on('warn', (warn) => console.warn(`[Discord Warn] ${warn}`));
       this.client.on('invalidated', () => console.error('[Discord Error] セッションが無効化されました'));
+
+      // REST API のレート制限（DiscordがIPを制限している場合ここに出る）
+      this.client.rest.on('rateLimited', (info) => {
+        console.warn(`[Discord RateLimit] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
+      });
       
       this.client.once(Events.ClientReady, async () => {
         console.log(`✅ Discord Bot ログイン成功: ${this.client.user.tag}`);
