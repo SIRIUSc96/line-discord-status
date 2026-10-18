@@ -14,8 +14,8 @@ const config = {
   port: parseInt(process.env.PORT || '3000', 10),
 
   // --- ゲーム選択パネル設定 ---
-  // 名前を変更する対象VCのチャンネルID（1箇所で管理。後からIDを貼り替えてください）
-  targetVoiceChannelId: process.env.TARGET_VC_ID || '123456789012345678',
+  // 名前を変更する対象VCのチャンネルID（1箇所で管理）
+  targetVoiceChannelId: process.env.TARGET_VC_ID || '1558922691132792832',
 
   // ゲーム一覧（1行足すだけで簡単に追加できます）
   games: [

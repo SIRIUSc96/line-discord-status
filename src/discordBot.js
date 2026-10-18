@@ -235,9 +235,11 @@ class DiscordBot {
    */
   async joinFirstVoiceChannel() {
     if (!this.guild) return;
-    const vc = this.guild.channels.cache.find(c => c.type === 2 && c.name === '集いの広場');
+    const vc =
+      this.guild.channels.cache.find(c => c.type === 2 && c.name === '集いの広場') ||
+      this.guild.channels.cache.get(this.config.targetVoiceChannelId);
     if (!vc) {
-      console.log('⚠️ ボイスチャンネル「集いの広場」が見つかりません');
+      console.log('⚠️ 入室対象のボイスチャンネルが見つかりません');
       return;
     }
 
