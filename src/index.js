@@ -97,23 +97,34 @@ async function main() {
 
   // 診断用: 直近のログと、このサーバーからDiscordへ届くかのテスト結果
   app.get('/debug', async (_req, res) => {
-    let probe;
-    try {
-      const r = await fetch('https://discord.com/api/v10/gateway', { signal: AbortSignal.timeout(10000) });
-      probe = {
-        status: r.status,
-        retryAfter: r.headers.get('retry-after'),
-        cfRay: r.headers.get('cf-ray'),
-        body: (await r.text()).slice(0, 300),
-      };
-    } catch (e) {
-      probe = { error: e.message };
-    }
+    const probeUrls = [
+      'https://discord.com/api/v10/gateway',
+      'https://canary.discord.com/api/v10/gateway',
+      'https://ptb.discord.com/api/v10/gateway',
+      'https://discordapp.com/api/v9/gateway',
+    ];
+    const probes = {};
+    await Promise.all(
+      probeUrls.map(async (u) => {
+        try {
+          const r = await fetch(u, { signal: AbortSignal.timeout(8000) });
+          probes[u] = {
+            status: r.status,
+            retryAfter: r.headers.get('retry-after'),
+            cfRay: r.headers.get('cf-ray'),
+          };
+        } catch (e) {
+          probes[u] = { error: e.message };
+        }
+      })
+    );
     res.json({
       discord: discordBot.client.isReady() ? 'online' : 'offline',
       wsStatus: discordBot.client.ws?.status,
+      statusMessageId: discordBot.statusMessageId,
+      gamePanelMessageId: discordBot.gamePanelMessageId,
       uptime: Math.floor(process.uptime()),
-      discordProbe: probe,
+      discordProbe: probes,
       logs: recentLogs,
     });
   });

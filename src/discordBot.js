@@ -1,4 +1,12 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Events, PermissionFlagsBits } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActivityType,
+  Events,
+  PermissionFlagsBits,
+  DefaultRestOptions,
+} = require('discord.js');
 const {
   GAME_PANEL_COMMAND_NAME,
   GAME_PANEL_COMMAND_DEF,
@@ -6,12 +14,21 @@ const {
   handleGameSelectInteraction,
 } = require('./gamePanel');
 
+const PRIMARY_API_BASE = 'https://discord.com/api/v10';
+const FALLBACK_API_BASES = [
+  'https://canary.discord.com/api/v10',
+  'https://ptb.discord.com/api/v10',
+  'https://discordapp.com/api/v9',
+];
+
 /**
  * Discord Bot の管理
  */
 class DiscordBot {
   constructor(config) {
     this.config = config;
+    const defaultMakeRequest = DefaultRestOptions.makeRequest;
+
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -21,6 +38,26 @@ class DiscordBot {
       rest: {
         timeout: 10000,
         retries: 0,
+        makeRequest: async (url, init) => {
+          const res = await defaultMakeRequest(url, init);
+          // Render共有IPでCloudflareのグローバル429ブロック(x-ratelimit-bucket無し)に当たった場合、別ドメインへフォールバック
+          if (res.status === 429 && !res.headers.get('x-ratelimit-bucket') && url.startsWith(PRIMARY_API_BASE)) {
+            const pathPart = url.slice(PRIMARY_API_BASE.length);
+            for (const base of FALLBACK_API_BASES) {
+              try {
+                const fallbackUrl = `${base}${pathPart}`;
+                const fbRes = await defaultMakeRequest(fallbackUrl, init);
+                if (fbRes.status !== 429 || fbRes.headers.get('x-ratelimit-bucket')) {
+                  console.log(`⚡ REST フォールバック成功: ${base}${pathPart} (status=${fbRes.status})`);
+                  return fbRes;
+                }
+              } catch (e) {
+                // 次のフォールバックを試行
+              }
+            }
+          }
+          return res;
+        },
         rejectOnRateLimit: (info) => {
           const waitMs = Math.max(info.timeToReset || 0, info.retryAfter || 0, info.sublimitTimeout || 0);
           console.warn(
@@ -57,12 +94,54 @@ class DiscordBot {
 
     this.statusMessageId = null;
     this.gamePanelMessageId = null;
+    this.commandsRegistered = false;
+    this.initRetryTimer = null;
     this.channel = null;
     this.guild = null;
     this.ready = false;
     this.notificationMessages = new Map(); // lineUserId -> messageId
     this.onVoiceStartCallback = null; // 2人通話開始時に呼ばれるコールバック
     this.notifiedChannels = new Set(); // 通話開始通知済みのチャンネルID
+  }
+
+  /**
+   * ステータスボード・ゲーム選択パネル・スラッシュコマンドの初期同期（429発生時は自動リトライ）
+   */
+  async _syncChannelMessagesAndCommands() {
+    if (!this.channel || !this.guild) return;
+
+    if (!this.commandsRegistered) {
+      try {
+        await this.guild.commands.set([GAME_PANEL_COMMAND_DEF]);
+        this.commandsRegistered = true;
+        console.log('✅ スラッシュコマンド /gamepanel を登録しました');
+      } catch (e) {
+        console.warn('⚠️ スラッシュコマンド登録警告:', e.message);
+      }
+    }
+
+    if (!this.statusMessageId) {
+      await this._findOrCreateStatusMessage();
+    }
+
+    if (!this.gamePanelMessageId) {
+      await this._findOrCreateGamePanel();
+    }
+
+    if (this.statusMessageId && this.gamePanelMessageId) {
+      if (this.initRetryTimer) {
+        clearInterval(this.initRetryTimer);
+        this.initRetryTimer = null;
+        console.log('✅ ステータスボードとゲーム選択パネルの同期が完了しました');
+      }
+    } else if (!this.initRetryTimer) {
+      console.log('⏳ REST API制限のため、60秒ごとにパネル同期を自動リトライします...');
+      this.initRetryTimer = setInterval(() => {
+        this._syncChannelMessagesAndCommands().catch((err) =>
+          console.warn('⚠️ パネル自動リトライエラー:', err.message)
+        );
+      }, 60 * 1000);
+    }
   }
 
   /**
@@ -117,16 +196,7 @@ class DiscordBot {
             .join(', ');
           console.log(`🔊 サーバー内のVC一覧: ${vcs}`);
 
-          // ゲーム選択パネルのスラッシュコマンドをギルドに登録（即時反映）
-          try {
-            await this.guild.commands.set([GAME_PANEL_COMMAND_DEF]);
-            console.log('✅ スラッシュコマンド /gamepanel を登録しました');
-          } catch (e) {
-            console.warn('⚠️ スラッシュコマンド登録警告:', e.message);
-          }
-
-          await this._findOrCreateStatusMessage();
-          await this._findOrCreateGamePanel();
+          await this._syncChannelMessagesAndCommands();
           resolve();
         } catch (e) {
           console.error('❌ Discord Bot 初期セットアップエラー:', e.message);
@@ -139,6 +209,9 @@ class DiscordBot {
       // スラッシュコマンド & ゲーム選択ボタン / メニューのインタラクション監視
       this.client.on(Events.InteractionCreate, async (interaction) => {
         try {
+          console.log(
+            `⚡ [Interaction受信] user=${interaction.user?.tag} customId=${interaction.customId || interaction.commandName}`
+          );
           // 管理者コマンド: /gamepanel
           if (interaction.isChatInputCommand()) {
             if (interaction.commandName === GAME_PANEL_COMMAND_NAME) {
@@ -367,7 +440,6 @@ class DiscordBot {
       }
     } catch (e) {
       console.error('ステータスメッセージの検索に失敗:', e.message);
-      await this._createNewStatusMessage([]);
     }
   }
 
@@ -399,8 +471,8 @@ class DiscordBot {
       const payload = buildGamePanelPayload(this.config.games);
 
       if (panelMessage) {
-        this.gamePanelMessageId = panelMessage.id;
         await panelMessage.edit(payload);
+        this.gamePanelMessageId = panelMessage.id;
         console.log('🎮 既存のゲーム選択パネルを発見・最新状態に更新しました');
         if (!panelMessage.pinned) {
           try {
