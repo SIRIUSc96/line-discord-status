@@ -20,17 +20,41 @@ class DiscordBot {
       ],
       rest: {
         timeout: 10000,
-        retries: 1,
+        retries: 0,
         rejectOnRateLimit: (info) => {
-          console.warn(`[Discord RateLimit] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
-          // 4秒を超える長い待機（10分に2回のチャンネル名変更制限など）だけ即エラーとしてcatchへ渡す
-          return info.timeToReset > 4000;
+          const waitMs = Math.max(info.timeToReset || 0, info.retryAfter || 0, info.sublimitTimeout || 0);
+          console.warn(
+            `[Discord RateLimit] ${info.method} ${info.route} wait=${waitMs}ms (reset=${info.timeToReset}, retry=${info.retryAfter}, sublimit=${info.sublimitTimeout}, global=${info.global})`
+          );
+          // 2.5秒を超えるレート制限待機（10分に2回のチャンネル名変更制限など）はスリープせず即エラーとしてcatchへ渡す
+          return waitMs > 2500;
         },
       },
       ws: {
         timeout: 10000, // WebSocket接続タイムアウトを10秒に設定
       },
     });
+
+    // Renderの共有IPで /gateway/bot のみがCloudflare 429ブロックされてログインが止まる問題を回避するため、
+    // 固定のDiscord Gateway URL (wss://gateway.discord.gg) を即座に返してWebSocketへ直接接続する
+    const origRestGet = this.client.rest.get.bind(this.client.rest);
+    this.client.rest.get = async (fullRoute, options) => {
+      if (fullRoute === '/gateway/bot') {
+        console.log('⚡ /gateway/bot をバイパスし、直接 wss://gateway.discord.gg へWebSocket接続します');
+        return {
+          url: 'wss://gateway.discord.gg',
+          shards: 1,
+          session_start_limit: {
+            total: 1000,
+            remaining: 999,
+            reset_after: 14400000,
+            max_concurrency: 1,
+          },
+        };
+      }
+      return origRestGet(fullRoute, options);
+    };
+
     this.statusMessageId = null;
     this.gamePanelMessageId = null;
     this.channel = null;
@@ -60,23 +84,32 @@ class DiscordBot {
       this.client.on('warn', (warn) => console.warn(`[Discord Warn] ${warn}`));
       this.client.on('invalidated', () => console.error('[Discord Error] セッションが無効化されました'));
 
-      // REST API のレート制限（DiscordがIPを制限している場合ここに出る）
+      // REST API のレート制限・429デバッグ出力
       this.client.rest.on('rateLimited', (info) => {
-        console.warn(`[Discord RateLimit] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
+        console.warn(`[Discord RateLimit Event] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
+      });
+      this.client.rest.on('restDebug', (info) => {
+        if (info.includes('429') || info.includes('rate limit') || info.includes('Global') || info.includes('Retry After')) {
+          console.warn(`[Discord REST 429] ${info}`);
+        }
       });
       
       this.client.once(Events.ClientReady, async () => {
         console.log(`✅ Discord Bot ログイン成功: ${this.client.user.tag}`);
 
         try {
-          this.channel = await this.client.channels.fetch(this.config.discord.channelId.trim());
+          const chId = this.config.discord.channelId.trim();
+          this.channel =
+            this.client.channels.cache.get(chId) ||
+            (await this.client.channels.fetch(chId));
           if (!this.channel) {
-            throw new Error(`チャンネル ${this.config.discord.channelId} が見つかりません`);
+            throw new Error(`チャンネル ${chId} が見つかりません`);
           }
           if (!this.channel.isTextBased()) {
             throw new Error('指定されたチャンネルはテキストチャンネルではありません');
           }
           this.guild = this.channel.guild;
+          this.ready = true;
 
           const vcs = this.guild.channels.cache
             .filter((c) => c.isVoiceBased())
@@ -94,11 +127,12 @@ class DiscordBot {
 
           await this._findOrCreateStatusMessage();
           await this._findOrCreateGamePanel();
-          this.ready = true;
           resolve();
         } catch (e) {
-          console.error('❌ Discord Bot チャンネルフェッチ/メッセージ作成エラー:', e);
-          reject(e);
+          console.error('❌ Discord Bot 初期セットアップエラー:', e.message);
+          // WebSocket自体は接続できているため、resolveして稼働を継続する
+          this.ready = true;
+          resolve();
         }
       });
 

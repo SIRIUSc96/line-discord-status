@@ -168,25 +168,23 @@ async function handleGameSelectInteraction(interaction, config, guild) {
     });
   }
 
-  // 3秒ルールで「時間内に応答しませんでした」になるのを防ぐため、先に保留応答（deferReply）を送る
-  await interaction.deferReply({ ephemeral: true });
-
   try {
     const oldName = targetVc.name;
 
-    // Discord側でレート制限待機が発生してもハングしないよう5秒タイムアウトを設定
+    // Discordの3秒ルール内に必ず応答するため、2秒タイムアウトで競合させる
     await Promise.race([
       targetVc.setName(selectedGame),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('RENAME_TIMEOUT_RATE_LIMIT')), 5000)
+        setTimeout(() => reject(new Error('RENAME_TIMEOUT_RATE_LIMIT')), 2000)
       ),
     ]);
 
     renameTimestamps.push(Date.now());
     console.log(`🎮 [VC名変更成功] ${interaction.user.tag} が「${oldName}」→「${selectedGame}」に変更しました`);
 
-    return await interaction.editReply({
+    return await interaction.reply({
       content: `✅ 対象VCの名前を「**${selectedGame}**」に変更しました！`,
+      ephemeral: true,
     });
   } catch (error) {
     console.error('❌ VC名変更エラー:', error.message || error);
@@ -200,20 +198,23 @@ async function handleGameSelectInteraction(interaction, config, guild) {
       /rate limit|ratelimit|retry/i.test(error.message);
 
     if (isRateLimit) {
-      return await interaction.editReply({
+      return await interaction.reply({
         content: '⏳ チャンネル名の変更制限（10分に2回まで）に達しました。少し待ってからもう一度押してね。',
+        ephemeral: true,
       });
     }
 
     // 権限不足の場合
     if (error.code === 50013 || /missing permissions/i.test(error.message)) {
-      return await interaction.editReply({
+      return await interaction.reply({
         content: '⚠️ Botに「チャンネルの管理」権限がないため、名前を変更できませんでした。サーバー管理者に確認してください。',
+        ephemeral: true,
       });
     }
 
-    return await interaction.editReply({
+    return await interaction.reply({
       content: '⚠️ チャンネル名の変更に失敗しました。少し待ってからもう一度試してください。',
+      ephemeral: true,
     });
   }
 }
