@@ -20,10 +20,11 @@ class DiscordBot {
       ],
       rest: {
         timeout: 10000,
-        retries: 0,
+        retries: 1,
         rejectOnRateLimit: (info) => {
-          console.warn(`[Discord RateLimit Reject] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
-          return true;
+          console.warn(`[Discord RateLimit] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
+          // 4秒を超える長い待機（10分に2回のチャンネル名変更制限など）だけ即エラーとしてcatchへ渡す
+          return info.timeToReset > 4000;
         },
       },
       ws: {
