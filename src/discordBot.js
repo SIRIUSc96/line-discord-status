@@ -16,9 +16,9 @@ const {
 
 const PRIMARY_API_BASE = 'https://discord.com/api/v10';
 const FALLBACK_API_BASES = [
+  'https://discordapp.com/api/v9',
   'https://canary.discord.com/api/v10',
   'https://ptb.discord.com/api/v10',
-  'https://discordapp.com/api/v9',
 ];
 
 /**
@@ -28,6 +28,8 @@ class DiscordBot {
   constructor(config) {
     this.config = config;
     const defaultMakeRequest = DefaultRestOptions.makeRequest;
+    let activeFallbackBase = null;
+    let activeFallbackUntil = 0;
 
     this.client = new Client({
       intents: [
@@ -39,24 +41,38 @@ class DiscordBot {
         timeout: 10000,
         retries: 0,
         makeRequest: async (url, init) => {
-          const res = await defaultMakeRequest(url, init);
-          // Render共有IPでCloudflareのグローバル429ブロック(x-ratelimit-bucket無し)に当たった場合、別ドメインへフォールバック
-          if (res.status === 429 && !res.headers.get('x-ratelimit-bucket') && url.startsWith(PRIMARY_API_BASE)) {
+          if (url.startsWith(PRIMARY_API_BASE)) {
             const pathPart = url.slice(PRIMARY_API_BASE.length);
-            for (const base of FALLBACK_API_BASES) {
-              try {
-                const fallbackUrl = `${base}${pathPart}`;
-                const fbRes = await defaultMakeRequest(fallbackUrl, init);
-                if (fbRes.status !== 429 || fbRes.headers.get('x-ratelimit-bucket')) {
-                  console.log(`⚡ REST フォールバック成功: ${base}${pathPart} (status=${fbRes.status})`);
-                  return fbRes;
+
+            // 直近でCloudflare 429を検知していた場合は、最初から高速なフォールバック先を使用する
+            if (activeFallbackBase && Date.now() < activeFallbackUntil) {
+              const directRes = await defaultMakeRequest(`${activeFallbackBase}${pathPart}`, init);
+              if (directRes.status !== 429 || directRes.headers.get('x-ratelimit-bucket')) {
+                return directRes;
+              }
+              activeFallbackBase = null;
+            }
+
+            const res = await defaultMakeRequest(url, init);
+            // Render共有IPでCloudflareのグローバル429ブロック(x-ratelimit-bucket無し)に当たった場合、別ドメインへフォールバック
+            if (res.status === 429 && !res.headers.get('x-ratelimit-bucket')) {
+              for (const base of FALLBACK_API_BASES) {
+                try {
+                  const fbRes = await defaultMakeRequest(`${base}${pathPart}`, init);
+                  if (fbRes.status !== 429 || fbRes.headers.get('x-ratelimit-bucket')) {
+                    activeFallbackBase = base;
+                    activeFallbackUntil = Date.now() + 10 * 60 * 1000; // 10分間キャッシュして即応答させる
+                    console.log(`⚡ REST フォールバック成功(10分間優先): ${base}${pathPart} (status=${fbRes.status})`);
+                    return fbRes;
+                  }
+                } catch (e) {
+                  // 次のフォールバックを試行
                 }
-              } catch (e) {
-                // 次のフォールバックを試行
               }
             }
+            return res;
           }
-          return res;
+          return defaultMakeRequest(url, init);
         },
         rejectOnRateLimit: (info) => {
           const waitMs = Math.max(info.timeToReset || 0, info.retryAfter || 0, info.sublimitTimeout || 0);
