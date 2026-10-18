@@ -8,11 +8,9 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.7",
-    "express": "^4.21.1",
-    "tweetnacl": "^1.0.3"
+    "express": "^4.21.1"
   },
   "engines": {
     "node": ">=18.0.0"

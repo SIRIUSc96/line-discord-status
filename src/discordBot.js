@@ -1,4 +1,10 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Events } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Events, PermissionFlagsBits } = require('discord.js');
+const {
+  GAME_PANEL_COMMAND_NAME,
+  GAME_PANEL_COMMAND_DEF,
+  buildGamePanelPayload,
+  handleGameSelectInteraction,
+} = require('./gamePanel');
 
 /**
  * Discord Bot の管理
@@ -66,12 +72,70 @@ class DiscordBot {
           }
           this.guild = this.channel.guild;
 
+          // ゲーム選択パネルのスラッシュコマンドをギルドに登録（即時反映）
+          try {
+            await this.guild.commands.set([GAME_PANEL_COMMAND_DEF]);
+            console.log('✅ スラッシュコマンド /gamepanel を登録しました');
+          } catch (e) {
+            console.warn('⚠️ スラッシュコマンド登録警告:', e.message);
+          }
+
           await this._findOrCreateStatusMessage();
           this.ready = true;
           resolve();
         } catch (e) {
           console.error('❌ Discord Bot チャンネルフェッチ/メッセージ作成エラー:', e);
           reject(e);
+        }
+      });
+
+      // スラッシュコマンド & ゲーム選択ボタン / メニューのインタラクション監視
+      this.client.on(Events.InteractionCreate, async (interaction) => {
+        try {
+          // 管理者コマンド: /gamepanel
+          if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === GAME_PANEL_COMMAND_NAME) {
+              if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                return await interaction.reply({
+                  content: '⚠️ このコマンドはサーバー管理者のみ実行できます。',
+                  ephemeral: true,
+                });
+              }
+
+              const payload = buildGamePanelPayload(this.config.games);
+              await interaction.channel.send(payload);
+              return await interaction.reply({
+                content: '✅ ゲーム選択パネルをこのチャンネルに投稿しました！',
+                ephemeral: true,
+              });
+            }
+          }
+
+          // ゲーム選択ボタン / セレクトメニュー
+          if (interaction.isButton() || interaction.isStringSelectMenu()) {
+            if (interaction.customId.startsWith('game_btn_') || interaction.customId === 'game_select_menu') {
+              await handleGameSelectInteraction(interaction, this.config, this.guild);
+            }
+          }
+        } catch (e) {
+          console.error('インタラクション処理エラー:', e);
+        }
+      });
+
+      // テキストコマンド: !gamepanel（スラッシュコマンド反映前などのフォールバック用）
+      this.client.on(Events.MessageCreate, async (message) => {
+        try {
+          if (message.author.bot || !message.guild) return;
+          if (message.content.trim() === '!gamepanel') {
+            if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) {
+              return await message.reply('⚠️ このコマンドはサーバー管理者のみ実行できます。');
+            }
+            const payload = buildGamePanelPayload(this.config.games);
+            await message.channel.send(payload);
+            console.log(`🎮 [管理者コマンド] ${message.author.tag} が !gamepanel でパネルを投稿しました`);
+          }
+        } catch (e) {
+          console.error('メッセージコマンド処理エラー:', e);
         }
       });
 
