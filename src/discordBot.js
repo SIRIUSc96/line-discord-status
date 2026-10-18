@@ -19,8 +19,12 @@ class DiscordBot {
         GatewayIntentBits.GuildVoiceStates, // VCの入退室監視と接続に必要
       ],
       rest: {
-        timeout: 15000,
-        retries: 3,
+        timeout: 10000,
+        retries: 0,
+        rejectOnRateLimit: (info) => {
+          console.warn(`[Discord RateLimit Reject] ${info.method} ${info.route} 待機${info.timeToReset}ms global=${info.global}`);
+          return true;
+        },
       },
       ws: {
         timeout: 10000, // WebSocket接続タイムアウトを10秒に設定
@@ -72,6 +76,12 @@ class DiscordBot {
             throw new Error('指定されたチャンネルはテキストチャンネルではありません');
           }
           this.guild = this.channel.guild;
+
+          const vcs = this.guild.channels.cache
+            .filter((c) => c.isVoiceBased())
+            .map((c) => `${c.name}(${c.id})`)
+            .join(', ');
+          console.log(`🔊 サーバー内のVC一覧: ${vcs}`);
 
           // ゲーム選択パネルのスラッシュコマンドをギルドに登録（即時反映）
           try {
