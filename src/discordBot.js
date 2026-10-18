@@ -27,6 +27,7 @@ class DiscordBot {
       },
     });
     this.statusMessageId = null;
+    this.gamePanelMessageId = null;
     this.channel = null;
     this.guild = null;
     this.ready = false;
@@ -81,6 +82,7 @@ class DiscordBot {
           }
 
           await this._findOrCreateStatusMessage();
+          await this._findOrCreateGamePanel();
           this.ready = true;
           resolve();
         } catch (e) {
@@ -102,10 +104,9 @@ class DiscordBot {
                 });
               }
 
-              const payload = buildGamePanelPayload(this.config.games);
-              await interaction.channel.send(payload);
+              await this.postOrRecreateGamePanel(interaction.channel);
               return await interaction.reply({
-                content: '✅ ゲーム選択パネルをこのチャンネルに投稿しました！',
+                content: '✅ ゲーム選択パネルをこのチャンネルに設置しました！',
                 ephemeral: true,
               });
             }
@@ -130,9 +131,8 @@ class DiscordBot {
             if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) {
               return await message.reply('⚠️ このコマンドはサーバー管理者のみ実行できます。');
             }
-            const payload = buildGamePanelPayload(this.config.games);
-            await message.channel.send(payload);
-            console.log(`🎮 [管理者コマンド] ${message.author.tag} が !gamepanel でパネルを投稿しました`);
+            await this.postOrRecreateGamePanel(message.channel);
+            console.log(`🎮 [管理者コマンド] ${message.author.tag} が !gamepanel でパネルを設置しました`);
           }
         } catch (e) {
           console.error('メッセージコマンド処理エラー:', e);
@@ -334,6 +334,78 @@ class DiscordBot {
     } catch (e) {
       console.error('ピン留めエラー:', e.message);
     }
+  }
+
+  /**
+   * ステータスボードと同じチャンネルで「ゲーム選択パネル」を検索・自動設置（または最新の内容に更新）
+   */
+  async _findOrCreateGamePanel() {
+    try {
+      const messages = await this.channel.messages.fetch({ limit: 50 });
+      const panelMessage = messages.find(
+        (m) =>
+          m.author.id === this.client.user.id &&
+          m.embeds.length > 0 &&
+          m.embeds[0].title?.includes('ゲーム選択パネル')
+      );
+
+      const payload = buildGamePanelPayload(this.config.games);
+
+      if (panelMessage) {
+        this.gamePanelMessageId = panelMessage.id;
+        await panelMessage.edit(payload);
+        console.log('🎮 既存のゲーム選択パネルを発見・最新状態に更新しました');
+        if (!panelMessage.pinned) {
+          try {
+            await panelMessage.pin();
+          } catch (e) {
+            // ピン留め失敗は無視
+          }
+        }
+      } else {
+        await this._createNewGamePanel(this.channel);
+        console.log('🎮 新しいゲーム選択パネルをステータスチャンネルに自動設置しました');
+      }
+    } catch (e) {
+      console.error('ゲーム選択パネルの検索・作成に失敗:', e.message);
+    }
+  }
+
+  async _createNewGamePanel(targetChannel) {
+    const ch = targetChannel || this.channel;
+    const payload = buildGamePanelPayload(this.config.games);
+    const msg = await ch.send(payload);
+    if (ch.id === this.channel?.id) {
+      this.gamePanelMessageId = msg.id;
+    }
+    try {
+      await msg.pin();
+    } catch (e) {
+      // ピン留め失敗は無視
+    }
+  }
+
+  /**
+   * 管理者コマンド (/gamepanel または !gamepanel) 実行時にパネルを再設置
+   * 既存のパネルが同じチャンネルにあれば重複しないよう削除してから最下部に再投稿（ステータスボードはそのまま保持）
+   */
+  async postOrRecreateGamePanel(targetChannel) {
+    const ch = targetChannel || this.channel;
+    try {
+      const messages = await ch.messages.fetch({ limit: 50 });
+      const existingPanels = messages.filter(
+        (m) =>
+          m.author.id === this.client.user.id &&
+          m.embeds.length > 0 &&
+          m.embeds[0].title?.includes('ゲーム選択パネル')
+      );
+      for (const [, oldPanel] of existingPanels) {
+        await oldPanel.delete().catch(() => {});
+      }
+    } catch (e) {
+      // ignore
+    }
+    await this._createNewGamePanel(ch);
   }
 
   _buildEmbed(activeUsers) {
