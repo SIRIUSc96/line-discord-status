@@ -58,20 +58,44 @@ function buildGamePanelPayload(games = []) {
     }
   } else {
     // 11個以上の場合はプルダウン型 (Select Menu)
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId('game_select_menu')
-      .setPlaceholder('🎮 プレイするゲームを選択してください');
+    // ※ Discordの仕様上、1つのSelect Menuには最大25個までしか登録できないため、25個ごとに分割する
+    const chunkSize = 25;
+    const totalChunks = Math.ceil(games.length / chunkSize);
 
-    games.forEach((game, index) => {
-      selectMenu.addOptions(
-        new StringSelectMenuOptionBuilder()
-          .setLabel(game)
-          .setValue(String(index))
-          .setDescription(`対象VCの名前を「${game}」に変更`)
-      );
-    });
+    for (let c = 0; c < totalChunks && components.length < 4; c++) {
+      const start = c * chunkSize;
+      const slice = games.slice(start, start + chunkSize);
+      const placeholder =
+        totalChunks === 1
+          ? '🎮 プレイするゲームを選択してください'
+          : `🎮 ゲームを選択 (${start + 1}〜${start + slice.length})`;
 
-    components.push(new ActionRowBuilder().addComponents(selectMenu));
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`game_select_menu_${c}`)
+        .setPlaceholder(placeholder);
+
+      slice.forEach((game, idx) => {
+        const globalIndex = start + idx;
+        selectMenu.addOptions(
+          new StringSelectMenuOptionBuilder()
+            .setLabel(game)
+            .setValue(String(globalIndex))
+            .setDescription(`対象VCの名前を「${game}」に変更`)
+        );
+      });
+
+      components.push(new ActionRowBuilder().addComponents(selectMenu));
+    }
+
+    // 「雑談」に戻すワンタップボタンも下部に用意
+    const resetIndex = games.findIndex((g) => g.includes('雑談'));
+    if (resetIndex !== -1 && components.length < 5) {
+      const resetBtn = new ButtonBuilder()
+        .setCustomId(`game_btn_${resetIndex}`)
+        .setLabel(`💬 ${games[resetIndex]} に戻す`)
+        .setStyle(ButtonStyle.Secondary);
+      components.push(new ActionRowBuilder().addComponents(resetBtn));
+    }
   }
 
   return {
@@ -95,7 +119,7 @@ async function handleGameSelectInteraction(interaction, config, guild) {
     if (!match) return;
     const index = parseInt(match[1], 10);
     selectedGame = games[index];
-  } else if (interaction.isStringSelectMenu() && interaction.customId === 'game_select_menu') {
+  } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('game_select_menu')) {
     const index = parseInt(interaction.values[0], 10);
     selectedGame = games[index];
   }

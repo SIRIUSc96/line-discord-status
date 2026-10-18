@@ -114,7 +114,7 @@ class DiscordBot {
 
           // ゲーム選択ボタン / セレクトメニュー
           if (interaction.isButton() || interaction.isStringSelectMenu()) {
-            if (interaction.customId.startsWith('game_btn_') || interaction.customId === 'game_select_menu') {
+            if (interaction.customId.startsWith('game_btn_') || interaction.customId.startsWith('game_select_menu')) {
               await handleGameSelectInteraction(interaction, this.config, this.guild);
             }
           }
