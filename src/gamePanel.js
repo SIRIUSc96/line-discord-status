@@ -128,7 +128,7 @@ function buildGamePanelPayload(configGames = []) {
   const games = getOrderedGames(configGames);
 
   const embed = new EmbedBuilder()
-    .setTitle('🎮 ゲーム選択パネル')
+    .setTitle('🎮 ゲーム・作業選択パネル')
     .setDescription(
       'プルダウンまたはボタンを押すと、対象のボイスチャンネル名が切り替わります。\n' +
       '※ ボイスチャンネルに入っていなくても変更できます（プルダウンは最近使用した順に並び替わります）。'
@@ -178,10 +178,10 @@ function buildGamePanelPayload(configGames = []) {
       const slice = games.slice(start, start + chunkSize);
       const placeholder =
         totalChunks === 1
-          ? '🎮 プレイするゲームを選択（最近使用した順）'
+          ? '🎮 ゲーム・作業を選択（最近使用した順）'
           : c === 0
-            ? `🎮 ゲームを選択 (${start + 1}〜${start + slice.length}・最近使用した順)`
-            : `🎮 ゲームを選択 (${start + 1}〜${start + slice.length})`;
+            ? `🎮 ゲーム・作業を選択 (${start + 1}〜${start + slice.length}・最近使用した順)`
+            : `🎮 ゲーム・作業を選択 (${start + 1}〜${start + slice.length})`;
 
       const selectMenu = new StringSelectMenuBuilder()
         .setCustomId(`game_select_menu_${c}`)

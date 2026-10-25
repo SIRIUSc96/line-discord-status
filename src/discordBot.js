@@ -366,15 +366,14 @@ class DiscordBot {
   }
 
   /**
-   * Botを最初のVCに入室させる（サーバーアイコンにマークをつけるため）
+   * Botを対象VCに入室させる（サーバーアイコンにマークをつけるため）
    */
   async joinFirstVoiceChannel() {
     if (!this.guild) return;
-    const vc =
-      this.guild.channels.cache.find(c => c.type === 2 && c.name === '集いの広場') ||
-      this.guild.channels.cache.get(this.config.targetVoiceChannelId);
+    const targetVcId = (this.config.targetVoiceChannelId || '').trim();
+    const vc = this.guild.channels.cache.get(targetVcId);
     if (!vc) {
-      console.log('⚠️ 入室対象のボイスチャンネルが見つかりません');
+      console.log(`⚠️ 入室対象のボイスチャンネル (ID: ${targetVcId}) が見つかりません`);
       return;
     }
 
@@ -473,7 +472,7 @@ class DiscordBot {
   }
 
   /**
-   * ステータスボードと同じチャンネルで「ゲーム選択パネル」を検索・自動設置（または最新の内容に更新）
+   * ステータスボードと同じチャンネルで「ゲーム・作業選択パネル」を検索・自動設置（または最新の内容に更新）
    */
   async _findOrCreateGamePanel() {
     try {
@@ -482,7 +481,7 @@ class DiscordBot {
         (m) =>
           m.author.id === this.client.user.id &&
           m.embeds.length > 0 &&
-          m.embeds[0].title?.includes('ゲーム選択パネル')
+          m.embeds[0].title?.includes('選択パネル')
       );
 
       if (panelMessage) {
@@ -490,7 +489,7 @@ class DiscordBot {
         const payload = buildGamePanelPayload(this.config.games);
         await panelMessage.edit(payload);
         this.gamePanelMessageId = panelMessage.id;
-        console.log('🎮 既存のゲーム選択パネルを発見・最新状態に更新しました');
+        console.log('🎮 既存のゲーム・作業選択パネルを発見・最新状態に更新しました');
         if (!panelMessage.pinned) {
           try {
             await panelMessage.pin();
@@ -500,10 +499,10 @@ class DiscordBot {
         }
       } else {
         await this._createNewGamePanel(this.channel);
-        console.log('🎮 新しいゲーム選択パネルをステータスチャンネルに自動設置しました');
+        console.log('🎮 新しいゲーム・作業選択パネルをステータスチャンネルに自動設置しました');
       }
     } catch (e) {
-      console.error('ゲーム選択パネルの検索・作成に失敗:', e.message);
+      console.error('ゲーム・作業選択パネルの検索・作成に失敗:', e.message);
     }
   }
 
@@ -533,7 +532,7 @@ class DiscordBot {
         (m) =>
           m.author.id === this.client.user.id &&
           m.embeds.length > 0 &&
-          m.embeds[0].title?.includes('ゲーム選択パネル')
+          m.embeds[0].title?.includes('選択パネル')
       );
       for (const [, oldPanel] of existingPanels) {
         await oldPanel.delete().catch(() => {});
