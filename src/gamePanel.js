@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -9,18 +11,127 @@ const {
 } = require('discord.js');
 
 const GAME_PANEL_COMMAND_NAME = 'gamepanel';
+const RECENT_GAMES_FILE = path.join(__dirname, '..', 'data', 'recentGames.json');
+
+// 最近使用した順のゲームリスト（メモリキャッシュ）
+let orderedGamesCache = null;
+
+/**
+ * 保存ファイルから並び順を読み込む
+ */
+function loadSavedOrder() {
+  try {
+    if (fs.existsSync(RECENT_GAMES_FILE)) {
+      const data = JSON.parse(fs.readFileSync(RECENT_GAMES_FILE, 'utf8'));
+      if (Array.isArray(data)) return data;
+    }
+  } catch (e) {
+    console.warn('⚠️ recentGames.json 読み込み警告:', e.message);
+  }
+  return null;
+}
+
+/**
+ * 並び順をファイルに保存する
+ */
+function saveOrder(list) {
+  try {
+    const dir = path.dirname(RECENT_GAMES_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(RECENT_GAMES_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('⚠️ recentGames.json 保存警告:', e.message);
+  }
+}
+
+/**
+ * config.games と現在の並び順をマージして最新の並び順配列を返す
+ * - config.games に新しく追加された項目は、config.games 内の直前の項目の後ろ（または先頭付近）に挿入する
+ * - config.games から削除された項目は除外する
+ */
+function getOrderedGames(configGames = []) {
+  if (!orderedGamesCache) {
+    orderedGamesCache = loadSavedOrder() || [...configGames];
+  }
+
+  const validSet = new Set(configGames);
+  const result = orderedGamesCache.filter((g) => validSet.has(g));
+  const existingSet = new Set(result);
+
+  // config.games に新しく追加されたゲームがあれば適切な位置に差し込む
+  configGames.forEach((game, idx) => {
+    if (!existingSet.has(game)) {
+      if (idx === 0) {
+        result.unshift(game);
+      } else {
+        const prevGame = configGames[idx - 1];
+        const prevIdx = result.indexOf(prevGame);
+        if (prevIdx !== -1) {
+          result.splice(prevIdx + 1, 0, game);
+        } else {
+          result.unshift(game);
+        }
+      }
+      existingSet.add(game);
+    }
+  });
+
+  orderedGamesCache = result;
+  return orderedGamesCache;
+}
+
+/**
+ * Discord上の既存パネルメッセージからプルダウンの並び順を復元する（Render再起動対策）
+ */
+function restoreOrderFromMessage(panelMessage, configGames = []) {
+  try {
+    if (!panelMessage?.components?.length) return;
+    const extracted = [];
+    for (const row of panelMessage.components) {
+      for (const comp of row.components || []) {
+        if (Array.isArray(comp.options)) {
+          for (const opt of comp.options) {
+            if (opt.label) extracted.push(opt.label);
+          }
+        }
+      }
+    }
+    if (extracted.length > 0) {
+      orderedGamesCache = extracted;
+      getOrderedGames(configGames);
+      saveOrder(orderedGamesCache);
+      console.log(`🔄 既存パネルからゲームの並び順（${orderedGamesCache.length}件）を復元しました`);
+    }
+  } catch (e) {
+    console.warn('⚠️ 既存パネルからの並び順復元警告:', e.message);
+  }
+}
+
+/**
+ * 指定したゲームを「最近使用した順」の先頭へ移動する
+ */
+function recordGameUsed(selectedGame, configGames = []) {
+  const current = getOrderedGames(configGames);
+  orderedGamesCache = [selectedGame, ...current.filter((g) => g !== selectedGame)];
+  saveOrder(orderedGamesCache);
+  return orderedGamesCache;
+}
 
 /**
  * ゲーム選択パネルのメッセージ内容（Embed + ボタン/セレクトメニュー）を生成
- * @param {string[]} games - ゲーム一覧の文字列配列
+ * @param {string[]} configGames - 設定上のゲーム一覧の文字列配列
  * @returns {{ embeds: EmbedBuilder[], components: ActionRowBuilder[] }}
  */
-function buildGamePanelPayload(games = []) {
+function buildGamePanelPayload(configGames = []) {
+  const games = getOrderedGames(configGames);
+
   const embed = new EmbedBuilder()
     .setTitle('🎮 ゲーム選択パネル')
     .setDescription(
-      'ボタンを押すと、対象のボイスチャンネル名が切り替わります。\n' +
-      '※ ボイスチャンネルに入っていなくても変更できます。'
+      'プルダウンまたはボタンを押すと、対象のボイスチャンネル名が切り替わります。\n' +
+      '※ ボイスチャンネルに入っていなくても変更できます（プルダウンは最近使用した順に並び替わります）。'
     )
     .setColor(0x5865F2)
     .setFooter({
@@ -34,19 +145,19 @@ function buildGamePanelPayload(games = []) {
   if (games.length <= 10) {
     let currentRow = new ActionRowBuilder();
 
-    games.forEach((game, index) => {
+    games.forEach((game) => {
       // 5個ごとに新しい行を作成
-      if (index > 0 && index % 5 === 0) {
+      if (currentRow.components.length === 5) {
         components.push(currentRow);
         currentRow = new ActionRowBuilder();
       }
 
-      // 「雑談」やリセット系は緑(Success)またはグレー(Secondary)、他は青(Primary)
+      // 「雑談」やリセット系はグレー(Secondary)、他は青(Primary)
       const isReset = game.includes('雑談') || game.includes('リセット');
       const style = isReset ? ButtonStyle.Secondary : ButtonStyle.Primary;
 
       const button = new ButtonBuilder()
-        .setCustomId(`game_btn_${index}`)
+        .setCustomId(`game_btn_${game}`)
         .setLabel(game)
         .setStyle(style);
 
@@ -67,19 +178,20 @@ function buildGamePanelPayload(games = []) {
       const slice = games.slice(start, start + chunkSize);
       const placeholder =
         totalChunks === 1
-          ? '🎮 プレイするゲームを選択してください'
-          : `🎮 ゲームを選択 (${start + 1}〜${start + slice.length})`;
+          ? '🎮 プレイするゲームを選択（最近使用した順）'
+          : c === 0
+            ? `🎮 ゲームを選択 (${start + 1}〜${start + slice.length}・最近使用した順)`
+            : `🎮 ゲームを選択 (${start + 1}〜${start + slice.length})`;
 
       const selectMenu = new StringSelectMenuBuilder()
         .setCustomId(`game_select_menu_${c}`)
         .setPlaceholder(placeholder);
 
-      slice.forEach((game, idx) => {
-        const globalIndex = start + idx;
+      slice.forEach((game) => {
         selectMenu.addOptions(
           new StringSelectMenuOptionBuilder()
             .setLabel(game)
-            .setValue(String(globalIndex))
+            .setValue(game)
             .setDescription(`対象VCの名前を「${game}」に変更`)
         );
       });
@@ -87,14 +199,28 @@ function buildGamePanelPayload(games = []) {
       components.push(new ActionRowBuilder().addComponents(selectMenu));
     }
 
-    // 「雑談」に戻すワンタップボタンも下部に用意
-    const resetIndex = games.findIndex((g) => g.includes('雑談'));
-    if (resetIndex !== -1 && components.length < 5) {
-      const resetBtn = new ButtonBuilder()
-        .setCustomId(`game_btn_${resetIndex}`)
-        .setLabel(`💬 ${games[resetIndex]} に戻す`)
-        .setStyle(ButtonStyle.Secondary);
-      components.push(new ActionRowBuilder().addComponents(resetBtn));
+    // 「雑談中」「作業中」にワンタップで切り替えられるボタンも下部に用意
+    const quickRow = new ActionRowBuilder();
+    const zatsudanGame = configGames.find((g) => g.includes('雑談'));
+    if (zatsudanGame) {
+      quickRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`game_btn_${zatsudanGame}`)
+          .setLabel(`💬 ${zatsudanGame} に戻す`)
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+    const sagyoGame = configGames.find((g) => g.includes('作業'));
+    if (sagyoGame) {
+      quickRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`game_btn_${sagyoGame}`)
+          .setLabel(`💻 ${sagyoGame} にする`)
+          .setStyle(ButtonStyle.Primary)
+      );
+    }
+    if (quickRow.components.length > 0 && components.length < 5) {
+      components.push(quickRow);
     }
   }
 
@@ -118,14 +244,20 @@ async function handleGameSelectInteraction(interaction, config, guild) {
   const games = config.games || [];
   let selectedGame = null;
 
-  if (interaction.isButton()) {
-    const match = interaction.customId.match(/^game_btn_(\d+)$/);
-    if (!match) return;
-    const index = parseInt(match[1], 10);
-    selectedGame = games[index];
+  if (interaction.isButton() && interaction.customId.startsWith('game_btn_')) {
+    const raw = interaction.customId.slice('game_btn_'.length);
+    if (/^\d+$/.test(raw) && !games.includes(raw)) {
+      selectedGame = games[parseInt(raw, 10)];
+    } else {
+      selectedGame = raw;
+    }
   } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('game_select_menu')) {
-    const index = parseInt(interaction.values[0], 10);
-    selectedGame = games[index];
+    const raw = interaction.values[0];
+    if (/^\d+$/.test(raw) && !games.includes(raw)) {
+      selectedGame = games[parseInt(raw, 10)];
+    } else {
+      selectedGame = raw;
+    }
   }
 
   if (!selectedGame) return;
@@ -146,12 +278,26 @@ async function handleGameSelectInteraction(interaction, config, guild) {
     });
   }
 
+  // 選択されたゲームを「最近使用した順」の先頭へ移動する
+  recordGameUsed(selectedGame, games);
+
+  // パネルのプルダウン順序（最近使用した順）＆選択状態を非同期で更新
+  const refreshPanelMessage = () => {
+    if (interaction.message?.editable) {
+      interaction.message
+        .edit(buildGamePanelPayload(games))
+        .catch((err) => console.warn('⚠️ パネル並び順更新警告:', err.message));
+    }
+  };
+
   // すでに同じ名前の場合はAPIを叩かずに即座に応答（レート制限節約）
   if (targetVc.name === selectedGame) {
-    return await interaction.reply({
+    await interaction.reply({
       content: `ℹ️ すでに「**${selectedGame}**」になっています。`,
       ephemeral: true,
     });
+    refreshPanelMessage();
+    return;
   }
 
   // 直近10分以内の変更回数をチェック（10分に2回まで）
@@ -162,10 +308,12 @@ async function handleGameSelectInteraction(interaction, config, guild) {
   if (renameTimestamps.length >= 2) {
     const remainMin = Math.ceil((RENAME_WINDOW_MS - (now - renameTimestamps[0])) / 60000);
     console.warn(`⏳ [VC名変更制限] 10分に2回の上限によりスキップ (残り約${remainMin}分)`);
-    return await interaction.reply({
+    await interaction.reply({
       content: `⏳ チャンネル名の変更はDiscordの制限により「10分に2回まで」です。\nあと約 **${remainMin}分** 待ってからもう一度押してね。`,
       ephemeral: true,
     });
+    refreshPanelMessage();
+    return;
   }
 
   try {
@@ -182,10 +330,12 @@ async function handleGameSelectInteraction(interaction, config, guild) {
     renameTimestamps.push(Date.now());
     console.log(`🎮 [VC名変更成功] ${interaction.user.tag} が「${oldName}」→「${selectedGame}」に変更しました`);
 
-    return await interaction.reply({
+    await interaction.reply({
       content: `✅ 対象VCの名前を「**${selectedGame}**」に変更しました！`,
       ephemeral: true,
     });
+    refreshPanelMessage();
+    return;
   } catch (error) {
     console.error('❌ VC名変更エラー:', error.message || error);
 
@@ -198,10 +348,12 @@ async function handleGameSelectInteraction(interaction, config, guild) {
       /rate limit|ratelimit|retry/i.test(error.message);
 
     if (isRateLimit) {
-      return await interaction.reply({
+      await interaction.reply({
         content: '⏳ チャンネル名の変更制限（10分に2回まで）に達しました。少し待ってからもう一度押してね。',
         ephemeral: true,
       });
+      refreshPanelMessage();
+      return;
     }
 
     // 権限不足の場合
@@ -232,5 +384,6 @@ module.exports = {
   GAME_PANEL_COMMAND_NAME,
   GAME_PANEL_COMMAND_DEF,
   buildGamePanelPayload,
+  restoreOrderFromMessage,
   handleGameSelectInteraction,
 };

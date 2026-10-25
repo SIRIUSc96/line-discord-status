@@ -11,6 +11,7 @@ const {
   GAME_PANEL_COMMAND_NAME,
   GAME_PANEL_COMMAND_DEF,
   buildGamePanelPayload,
+  restoreOrderFromMessage,
   handleGameSelectInteraction,
 } = require('./gamePanel');
 
@@ -484,9 +485,9 @@ class DiscordBot {
           m.embeds[0].title?.includes('ゲーム選択パネル')
       );
 
-      const payload = buildGamePanelPayload(this.config.games);
-
       if (panelMessage) {
+        restoreOrderFromMessage(panelMessage, this.config.games);
+        const payload = buildGamePanelPayload(this.config.games);
         await panelMessage.edit(payload);
         this.gamePanelMessageId = panelMessage.id;
         console.log('🎮 既存のゲーム選択パネルを発見・最新状態に更新しました');

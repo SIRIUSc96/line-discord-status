@@ -20,6 +20,7 @@ const config = {
   // ゲーム一覧（1行足すだけで簡単に追加できます）
   games: [
     '雑談中',
+    '作業中',
     'TRPG中',
     'Amang US中',
     'PUBG:BATTLEGROUNDS中',
