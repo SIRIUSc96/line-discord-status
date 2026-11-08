@@ -99,6 +99,30 @@ async function main() {
     });
   });
 
+  // Bot起動用ページ: Discordパネルの「Botを起こす」リンクボタンから開かれる
+  app.get('/wake', (_req, res) => {
+    if (lineWake.ensureAwake) {
+      lineWake.ensureAwake().catch((e) => console.error('/wake 起動エラー:', e.message));
+    }
+    res.type('html').send(`<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bot起動</title>
+<style>body{font-family:sans-serif;text-align:center;padding:48px 16px;background:#2b2d31;color:#fff}
+#m{font-size:1.4em;margin-top:16px}small{color:#aaa}</style></head>
+<body><div style="font-size:3em">🔌</div><div id="m">Botを起動しています…<br><small>30〜60秒ほどかかります</small></div>
+<script>
+async function check(){
+  try{
+    const r=await fetch('/');const j=await r.json();
+    if(j.discord==='online'){document.getElementById('m').innerHTML='✅ Botが起動しました！<br><small>Discordに戻って操作できます</small>';return;}
+  }catch(e){}
+  setTimeout(check,4000);
+}
+check();
+</script></body></html>`);
+  });
+
   // 診断用: 直近のログと、このサーバーからDiscordへ届くかのテスト結果
   app.get('/debug', async (_req, res) => {
     const probeUrls = [

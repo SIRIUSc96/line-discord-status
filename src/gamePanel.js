@@ -11,6 +11,14 @@ const {
 } = require('discord.js');
 
 const GAME_PANEL_COMMAND_NAME = 'gamepanel';
+
+/**
+ * Bot起動用ページのURL（RenderのURL + /wake）
+ */
+function getWakeUrl() {
+  const base = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || '';
+  return base ? `${base.replace(/\/$/, '')}/wake` : null;
+}
 const RECENT_GAMES_FILE = path.join(__dirname, '..', 'data', 'recentGames.json');
 
 // 最近使用した順のゲームリスト（メモリキャッシュ）
@@ -131,7 +139,8 @@ function buildGamePanelPayload(configGames = []) {
     .setTitle('🎮 ゲーム・作業選択パネル')
     .setDescription(
       'プルダウンまたはボタンを押すと、対象のボイスチャンネル名が切り替わります。\n' +
-      '※ ボイスチャンネルに入っていなくても変更できます（プルダウンは最近使用した順に並び替わります）。'
+      '※ ボイスチャンネルに入っていなくても変更できます（プルダウンは最近使用した順に並び替わります）。\n' +
+      '※ Botがオフラインのときは「🔌 Botを起こす」を押して、30〜60秒ほど待ってください。'
     )
     .setColor(0x5865F2)
     .setFooter({
@@ -217,6 +226,16 @@ function buildGamePanelPayload(configGames = []) {
           .setCustomId(`game_btn_${sagyoGame}`)
           .setLabel(`💻 ${sagyoGame} にする`)
           .setStyle(ButtonStyle.Primary)
+      );
+    }
+    // Botが休止中（オフライン）でも押せるリンクボタン: 起動用ページを開いてBotを起こす
+    const wakeUrl = getWakeUrl();
+    if (wakeUrl) {
+      quickRow.addComponents(
+        new ButtonBuilder()
+          .setLabel('🔌 Botを起こす')
+          .setStyle(ButtonStyle.Link)
+          .setURL(wakeUrl)
       );
     }
     if (quickRow.components.length > 0 && components.length < 5) {
