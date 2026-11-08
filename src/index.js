@@ -47,6 +47,10 @@ const config = require('./config');
 const StatusManager = require('./statusManager');
 const DiscordBot = require('./discordBot');
 const { createLineHandler, sendLineBroadcast } = require('./lineHandler');
+const { isScheduledActive } = require('./schedule');
+
+// スケジュール制御の関数を後から差し込むためのホルダー（LINE Webhook → 休止中Botの起動）
+const lineWake = { ensureAwake: null };
 
 async function main() {
   console.log('');
@@ -80,7 +84,7 @@ async function main() {
         req.rawBody = buf.toString();
       },
     }),
-    createLineHandler(config, statusManager, discordBot)
+    createLineHandler(config, statusManager, discordBot, () => lineWake.ensureAwake?.())
   );
 
   // ヘルスチェック
@@ -139,22 +143,84 @@ async function main() {
   });
 
   // Discord Bot 起動 (非同期で裏で進める)
-  console.log('⌛ Discord Bot にログインしています...');
-  const tryStartDiscord = async () => {
-    try {
-      await discordBot.start();
-      console.log('✅ Discord Bot 起動完了！');
-      const activeOnStart = statusManager.getActiveUsers();
-      if (activeOnStart.length > 0) {
-        await discordBot.updateEmbed(activeOnStart);
-        console.log(`📋 ${activeOnStart.length} 人のアクティブユーザーを復元`);
+  // --- 稼働スケジュール制御 ---
+  // 平日の休止時間帯は Bot を停止（オフライン）。ただしLINEの操作があれば自動起動し、
+  // 最後の操作から statusTimeoutHours 時間、または誰かがVCにいる間は稼働を続ける。
+  let wakeUntil = 0;
+  let discordRunning = false;
+  let startPromise = null;
+  let retryTimer = null;
+
+  const shouldRun = () =>
+    isScheduledActive(config.schedule) ||
+    Date.now() < wakeUntil ||
+    discordBot.getVoiceChannelMembers().length > 0;
+
+  const startDiscord = () => {
+    if (discordRunning) return Promise.resolve();
+    if (startPromise) return startPromise;
+    startPromise = (async () => {
+      try {
+        console.log('⌛ Discord Bot にログインしています...');
+        await discordBot.start();
+        discordRunning = true;
+        console.log('✅ Discord Bot 起動完了！');
+        const activeOnStart = statusManager.getActiveUsers();
+        if (activeOnStart.length > 0) {
+          await discordBot.updateEmbed(activeOnStart);
+          console.log(`📋 ${activeOnStart.length} 人のアクティブユーザーを復元`);
+        }
+      } catch (e) {
+        console.error('⚠️ Discord Bot の起動に失敗 (5分後に再試行します):', e.message);
+        await discordBot.stop().catch(() => {});
+        if (!retryTimer) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (shouldRun()) startDiscord();
+          }, 5 * 60 * 1000);
+        }
+      } finally {
+        startPromise = null;
       }
-    } catch (e) {
-      console.error('⚠️ Discord Bot の起動に失敗 (5分後に再試行します):', e.message);
-      setTimeout(tryStartDiscord, 5 * 60 * 1000);
+    })();
+    return startPromise;
+  };
+
+  const stopDiscord = async () => {
+    if (!discordRunning) return;
+    discordRunning = false;
+    await discordBot.stop();
+  };
+
+  // LINE操作などで呼ばれる: 休止中でも起動して稼働を延長する
+  const ensureAwake = async () => {
+    wakeUntil = Date.now() + Math.max(config.statusTimeoutHours, 1) * 60 * 60 * 1000;
+    if (!discordRunning) {
+      console.log('🌅 LINE操作を検知したため、休止中のBotを起動します');
+      await startDiscord();
     }
   };
-  tryStartDiscord();
+  lineWake.ensureAwake = ensureAwake;
+
+  if (shouldRun()) {
+    startDiscord();
+  } else {
+    console.log('😴 現在は休止時間帯のため Discord Bot は起動しません（LINE操作で自動起動します）');
+  }
+
+  // 1分ごとにスケジュールを確認して起動/停止を切り替え
+  setInterval(async () => {
+    try {
+      if (shouldRun()) {
+        if (!discordRunning) await startDiscord();
+      } else if (discordRunning) {
+        console.log('😴 休止時間帯に入ったため Discord Bot を停止します');
+        await stopDiscord();
+      }
+    } catch (e) {
+      console.error('スケジュール制御エラー:', e.message);
+    }
+  }, 60 * 1000);
 
   // --- 自動タイムアウトチェック（1分ごと） ---
   setInterval(async () => {
@@ -173,6 +239,8 @@ async function main() {
   const selfUrl = process.env.RENDER_EXTERNAL_URL;
   if (selfUrl) {
     setInterval(() => {
+      // 休止時間帯は自己アクセスを止めて、Renderが自然にスリープできるようにする
+      if (!shouldRun()) return;
       fetch(selfUrl).catch((e) => console.error('キープアライブ失敗:', e.message));
     }, 10 * 60 * 1000);
     console.log(`💓 キープアライブ有効: ${selfUrl}`);

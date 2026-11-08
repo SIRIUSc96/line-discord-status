@@ -13,6 +13,15 @@ const config = {
   notifyWindowMinutes: parseInt(process.env.NOTIFY_WINDOW_MINUTES || '60', 10),
   port: parseInt(process.env.PORT || '3000', 10),
 
+  // --- 稼働スケジュール（日本時間）---
+  // 平日の sleepStartHour 時〜sleepEndHour 時は Bot を休止（土日は終日稼働）。
+  // 休止中でもLINEのボタン/スタンプ操作があれば自動で起動する。SCHEDULE_ENABLED=false で無効化。
+  schedule: {
+    enabled: process.env.SCHEDULE_ENABLED !== 'false',
+    sleepStartHour: parseInt(process.env.SLEEP_START_HOUR || '4', 10),
+    sleepEndHour: parseInt(process.env.SLEEP_END_HOUR || '19', 10),
+  },
+
   // --- ゲーム選択パネル設定 ---
   // 名前を変更する対象VCのチャンネルID（1箇所で管理）
   targetVoiceChannelId: process.env.TARGET_VC_ID || '1558922691132792832',

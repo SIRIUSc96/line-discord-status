@@ -28,6 +28,24 @@ const FALLBACK_API_BASES = [
 class DiscordBot {
   constructor(config) {
     this.config = config;
+    this.statusMessageId = null;
+    this.gamePanelMessageId = null;
+    this.commandsRegistered = false;
+    this.initRetryTimer = null;
+    this.channel = null;
+    this.guild = null;
+    this.ready = false;
+    this.stopped = false; // stop() 済み（次回 start() でクライアントを作り直す）
+    this.notificationMessages = new Map(); // lineUserId -> messageId
+    this.onVoiceStartCallback = null; // 2人通話開始時に呼ばれるコールバック
+    this.notifiedChannels = new Set(); // 通話開始通知済みのチャンネルID
+    this._initClient();
+  }
+
+  /**
+   * Discord クライアントを新規作成（再起動のたびに作り直せるよう分離）
+   */
+  _initClient() {
     const defaultMakeRequest = DefaultRestOptions.makeRequest;
     let activeFallbackBase = null;
     let activeFallbackUntil = 0;
@@ -108,17 +126,32 @@ class DiscordBot {
       }
       return origRestGet(fullRoute, options);
     };
+  }
 
-    this.statusMessageId = null;
-    this.gamePanelMessageId = null;
-    this.commandsRegistered = false;
-    this.initRetryTimer = null;
+  /**
+   * Discord Bot を停止（オフライン化）。次回 start() で新しいクライアントで再接続する
+   */
+  async stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.ready = false;
+    if (this.initRetryTimer) {
+      clearInterval(this.initRetryTimer);
+      this.initRetryTimer = null;
+    }
+    try {
+      this.leaveVoiceChannel();
+    } catch (e) {
+      // ignore
+    }
+    try {
+      await this.client.destroy();
+    } catch (e) {
+      console.warn('⚠️ Discord クライアント停止警告:', e.message);
+    }
     this.channel = null;
     this.guild = null;
-    this.ready = false;
-    this.notificationMessages = new Map(); // lineUserId -> messageId
-    this.onVoiceStartCallback = null; // 2人通話開始時に呼ばれるコールバック
-    this.notifiedChannels = new Set(); // 通話開始通知済みのチャンネルID
+    console.log('💤 Discord Bot を停止しました（オフライン）');
   }
 
   /**
@@ -165,6 +198,11 @@ class DiscordBot {
    * Discord Bot を起動してチャンネルに接続
    */
   async start() {
+    if (this.stopped) {
+      this._initClient();
+      this.stopped = false;
+      this.notifiedChannels.clear();
+    }
     return new Promise((resolve, reject) => {
       // Shard / WebSocket の接続状態をログに出力
       this.client.on('shardError', (error, shardId) => console.error(`❌ Shard ${shardId} エラー:`, error));

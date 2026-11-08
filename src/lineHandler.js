@@ -128,7 +128,7 @@ async function sendLineBroadcast(accessToken, text) {
 /**
  * LINE Webhook ハンドラーを作成
  */
-function createLineHandler(config, statusManager, discordBot) {
+function createLineHandler(config, statusManager, discordBot, ensureAwake) {
   return async (req, res) => {
     // --- 署名検証 ---
     const signature = req.headers['x-line-signature'];
@@ -205,6 +205,15 @@ function createLineHandler(config, statusManager, discordBot) {
       );
 
       console.log(`📩 メッセージ受信 [${updateType}]: ${displayName} (userId: ${userId})`);
+
+      // 休止時間帯でも、ステータス操作があればDiscord Botを起動する
+      if (ensureAwake) {
+        try {
+          await ensureAwake();
+        } catch (e) {
+          console.error('Bot起動エラー:', e.message);
+        }
+      }
 
       // ステータス更新
       const result = statusManager.handleUpdate(userId, displayName, updateType);
